@@ -20,6 +20,7 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    TabRouter.resetToHome();
     _currentIndex = TabRouter.tabIndex.value;
     TabRouter.tabIndex.addListener(_handleExternalTabChange);
   }

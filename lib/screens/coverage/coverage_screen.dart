@@ -569,6 +569,8 @@ class _CoverageScreenState extends State<CoverageScreen> {
   }
 
   Widget _buildTopUtilityButtons(User user) {
+    final safeName = _coerceString(user.name, fallback: 'U');
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -589,12 +591,31 @@ class _CoverageScreenState extends State<CoverageScreen> {
               },
             ),
             const SizedBox(width: 10),
-            _utilityIconButton(
-              icon: Icons.account_circle_outlined,
-              tooltip: 'Account',
-              onTap: () {
-                _showAccountSheet(user);
-              },
+            Tooltip(
+              message: 'Account',
+              child: GestureDetector(
+                onTap: () {
+                  _showAccountSheet(user);
+                },
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      _userInitials(safeName),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -645,9 +666,10 @@ class _CoverageScreenState extends State<CoverageScreen> {
   }
 
   Widget _buildPendingPlanNotice() {
-    final effectiveText = _pendingEffectiveDate == null
+    final safePendingDate = _coerceString(_pendingEffectiveDate);
+    final effectiveText = safePendingDate.isEmpty
         ? 'next week'
-        : DateFormat('d MMM').format(DateTime.tryParse(_pendingEffectiveDate!) ?? DateTime.now());
+        : DateFormat('d MMM').format(DateTime.tryParse(safePendingDate) ?? DateTime.now());
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -728,6 +750,20 @@ class _CoverageScreenState extends State<CoverageScreen> {
     return '$remaining more clean weeks to unlock $nextDiscount% discount.';
   }
 
+  String _coerceString(Object? value, {String fallback = ''}) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+
+  String _userInitials(String? name) {
+    final safeName = _coerceString(name);
+    final parts = safeName.trim().split(' ').where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return 'U';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  }
+
   void _openProfile() {
     _switchToTab(4);
   }
@@ -763,6 +799,9 @@ class _CoverageScreenState extends State<CoverageScreen> {
   }
 
   void _showAccountSheet(User user) {
+    final safeName = _coerceString(user.name, fallback: 'User');
+    final safePhone = _coerceString(user.phone, fallback: 'No phone');
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -775,12 +814,12 @@ class _CoverageScreenState extends State<CoverageScreen> {
                 leading: CircleAvatar(
                   backgroundColor: AppColors.primary,
                   child: Text(
-                    user.name.isEmpty ? 'U' : user.name.substring(0, 1).toUpperCase(),
+                    _userInitials(safeName),
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
                   ),
                 ),
-                title: Text(user.name),
-                subtitle: Text(user.phone),
+                title: Text(safeName),
+                subtitle: Text(safePhone),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _openProfile();
@@ -936,9 +975,9 @@ class _CoverageTopBackgroundPainter extends CustomPainter {
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          Color(0xFFE8F8F3),
-          Color(0xFFDDF4EC),
-          Color(0xFFF4FBF8),
+          AppColors.accentLight,
+          Color(0xFFD7F3EF),
+          Color(0xFFF4FBF9),
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
 

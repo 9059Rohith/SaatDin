@@ -35,20 +35,48 @@ class _ClaimsScreenState extends State<ClaimsScreen> {
       _isLoadingClaims = true;
     });
 
+    User? user;
+    Map<String, dynamic>? policy;
+    List<Claim> claims = const <Claim>[];
+    final loadIssues = <String>[];
+
     try {
-      final user = await _apiService.getProfile('me');
-      final policy = await _apiService.getPolicy('me');
-      final claims = await _apiService.getClaims('me');
+      try {
+        user = await _apiService.getProfile('me');
+      } catch (_) {
+        loadIssues.add('profile');
+      }
+
+      try {
+        policy = await _apiService.getPolicy('me');
+      } catch (_) {
+        loadIssues.add('policy');
+        policy = <String, dynamic>{};
+      }
+
+      try {
+        claims = await _apiService.getClaims('me');
+      } catch (_) {
+        loadIssues.add('claims');
+        claims = const <Claim>[];
+      }
+
       if (!mounted) return;
       setState(() {
-        _user = user;
-        _policy = policy;
+        _user = user ?? User.getMockUser();
+        _policy = policy ?? <String, dynamic>{};
         _claims = claims;
       });
-    } catch (_) {
-      if (mounted) {
+
+      if (loadIssues.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to load claims from backend.')),
+          SnackBar(
+            content: Text(
+              loadIssues.length == 1
+                  ? 'Failed to load ${loadIssues.first} from backend.'
+                  : 'Loaded claims view with partial backend data.',
+            ),
+          ),
         );
       }
     } finally {
@@ -61,6 +89,8 @@ class _ClaimsScreenState extends State<ClaimsScreen> {
   }
 
   Widget _buildTopUtilityButtons(User user) {
+    final safeName = _coerceString(user.name, fallback: 'U');
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -81,12 +111,31 @@ class _ClaimsScreenState extends State<ClaimsScreen> {
               },
             ),
             const SizedBox(width: 10),
-            _utilityIconButton(
-              icon: Icons.account_circle_outlined,
-              tooltip: 'Account',
-              onTap: () {
-                _showAccountSheet(user);
-              },
+            Tooltip(
+              message: 'Account',
+              child: GestureDetector(
+                onTap: () {
+                  _showAccountSheet(user);
+                },
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      _userInitials(safeName),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -422,6 +471,20 @@ class _ClaimsScreenState extends State<ClaimsScreen> {
     );
   }
 
+  String _coerceString(Object? value, {String fallback = ''}) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+
+  String _userInitials(String? name) {
+    final safeName = _coerceString(name);
+    final parts = safeName.trim().split(' ').where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return 'U';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  }
+
   void _openProfile() {
     _switchToTab(4);
   }
@@ -457,6 +520,9 @@ class _ClaimsScreenState extends State<ClaimsScreen> {
   }
 
   void _showAccountSheet(User user) {
+    final safeName = _coerceString(user.name, fallback: 'User');
+    final safePhone = _coerceString(user.phone, fallback: 'No phone');
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -469,12 +535,12 @@ class _ClaimsScreenState extends State<ClaimsScreen> {
                 leading: CircleAvatar(
                   backgroundColor: AppColors.primary,
                   child: Text(
-                    user.name.isEmpty ? 'U' : user.name.substring(0, 1).toUpperCase(),
+                    _userInitials(safeName),
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
                   ),
                 ),
-                title: Text(user.name),
-                subtitle: Text(user.phone),
+                title: Text(safeName),
+                subtitle: Text(safePhone),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _openProfile();
