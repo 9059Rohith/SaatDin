@@ -18,6 +18,9 @@ class PlatformCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isSvg = platform.logoPath.toLowerCase().endsWith('.svg');
+    final selectedIndicatorColor = platform.iconBackground.computeLuminance() < 0.7
+        ? platform.iconBackground
+        : platform.iconColor;
 
     return GestureDetector(
       onTap: onTap,
@@ -36,7 +39,7 @@ class PlatformCard extends StatelessWidget {
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: platform.iconBackground.withOpacity(0.15),
+                    color: platform.iconBackground.withValues(alpha: 0.15),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   )
@@ -60,8 +63,18 @@ class PlatformCard extends StatelessWidget {
                         padding: const EdgeInsets.all(8.0),
                         child: SvgPicture.asset(
                           platform.logoPath,
-                          placeholderBuilder: (BuildContext context) =>
-                              const CircularProgressIndicator(),
+                          placeholderBuilder: (BuildContext context) => Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  platform.iconColor,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       )
                     : Image.asset(
@@ -107,10 +120,10 @@ class PlatformCard extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isSelected ? (platform.iconBackground.computeLuminance() < 0.7 ? platform.iconBackground : platform.iconColor) : AppColors.border,
+                  color: isSelected ? selectedIndicatorColor : AppColors.border,
                   width: 2,
                 ),
-                color: isSelected ? (platform.iconBackground.computeLuminance() < 0.7 ? platform.iconBackground : platform.iconColor) : Colors.transparent,
+                color: isSelected ? selectedIndicatorColor : Colors.transparent,
               ),
               child: isSelected
                   ? const Icon(

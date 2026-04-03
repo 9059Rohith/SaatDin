@@ -27,10 +27,4 @@ flutter:
   assets:
     - assets/data/
     - assets/images/
-    - assets/images/logo.png
-    - assets/images/gig.png
-    - assets/images/swiggy.png
-    - assets/images/zepto.png
-    - assets/images/Blinkit-yellow-rounded.svg
-    - assets/images/zomato-logo-svg-vector_logoshape.png
 
