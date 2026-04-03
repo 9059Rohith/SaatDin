@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../screens/onboarding/onboarding_screen.dart';
 import '../screens/auth/auth_bootstrap_screen.dart';
 import '../screens/auth/check_worker_status_screen.dart';
 import '../screens/welcome_screen.dart';
@@ -12,6 +13,7 @@ import '../screens/main_shell.dart';
 class AppRoutes {
   AppRoutes._();
 
+  static const String onboarding = '/onboarding';
   static const String bootstrap = '/bootstrap';
   static const String welcome = '/welcome';
   static const String otpVerify = '/otp-verify';
@@ -24,6 +26,7 @@ class AppRoutes {
 
   static Map<String, WidgetBuilder> get routes {
     return {
+      onboarding: (context) => const OnboardingScreen(),
       bootstrap: (context) => const AuthBootstrapScreen(),
       welcome: (context) => const WelcomeScreen(),
       otpVerify: (context) => const OtpVerificationScreen(),
