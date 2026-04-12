@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import asyncpg
 
@@ -90,12 +90,37 @@ async def init_db() -> None:
             )
             """
         )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_location_signals (
+                phone TEXT PRIMARY KEY,
+                latitude DOUBLE PRECISION,
+                longitude DOUBLE PRECISION,
+                accuracy_meters DOUBLE PRECISION,
+                captured_at TIMESTAMPTZ,
+                tower_metadata_json JSONB,
+                motion_metadata_json JSONB,
+                received_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await conn.execute("ALTER TABLE worker_location_signals ADD COLUMN IF NOT EXISTS motion_metadata_json JSONB")
         await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS anomaly_score DOUBLE PRECISION")
         await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS anomaly_threshold DOUBLE PRECISION")
         await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS anomaly_flagged BOOLEAN")
         await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS anomaly_model_version TEXT")
         await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS anomaly_features_json JSONB")
         await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS anomaly_scored_at TIMESTAMPTZ")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_review_used BOOLEAN")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_review_status TEXT")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_provider TEXT")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_model TEXT")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_fallback_used BOOLEAN")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_decision_confidence DOUBLE PRECISION")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_decision_json JSONB")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_attempts_json JSONB")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_validation_error TEXT")
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS llm_scored_at TIMESTAMPTZ")
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS zonelock_reports (
@@ -124,6 +149,81 @@ async def init_db() -> None:
             )
             """
         )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fraud_cluster_runs (
+                id BIGSERIAL PRIMARY KEY,
+                started_at TIMESTAMPTZ NOT NULL,
+                finished_at TIMESTAMPTZ,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                lookback_days INTEGER NOT NULL,
+                time_bucket_minutes INTEGER NOT NULL,
+                min_edge_support INTEGER NOT NULL,
+                medium_risk_threshold DOUBLE PRECISION NOT NULL,
+                high_risk_threshold DOUBLE PRECISION NOT NULL,
+                claims_scanned INTEGER NOT NULL DEFAULT 0,
+                edge_count INTEGER NOT NULL DEFAULT 0,
+                cluster_count INTEGER NOT NULL DEFAULT 0,
+                flagged_cluster_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fraud_co_claim_clusters (
+                id BIGSERIAL PRIMARY KEY,
+                run_id BIGINT NOT NULL,
+                cluster_key TEXT NOT NULL,
+                risk_score DOUBLE PRECISION NOT NULL,
+                risk_level TEXT NOT NULL,
+                member_count INTEGER NOT NULL,
+                edge_count INTEGER NOT NULL,
+                event_count INTEGER NOT NULL,
+                frequency_score DOUBLE PRECISION NOT NULL,
+                recency_score DOUBLE PRECISION NOT NULL,
+                supporting_metadata_json JSONB,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fraud_co_claim_cluster_members (
+                id BIGSERIAL PRIMARY KEY,
+                cluster_id BIGINT NOT NULL,
+                phone TEXT NOT NULL,
+                claim_count INTEGER NOT NULL,
+                first_claim_at TIMESTAMPTZ,
+                last_claim_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fraud_co_claim_cluster_edges (
+                id BIGSERIAL PRIMARY KEY,
+                cluster_id BIGINT NOT NULL,
+                phone_a TEXT NOT NULL,
+                phone_b TEXT NOT NULL,
+                co_claim_count INTEGER NOT NULL,
+                recency_weight DOUBLE PRECISION NOT NULL,
+                edge_weight DOUBLE PRECISION NOT NULL,
+                last_co_claim_at TIMESTAMPTZ,
+                supporting_metadata_json JSONB,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_fraud_cluster_runs_created_at ON fraud_cluster_runs(created_at DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_fraud_co_claim_clusters_run_id ON fraud_co_claim_clusters(run_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_fraud_co_claim_clusters_risk_level ON fraud_co_claim_clusters(risk_level)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_fraud_co_claim_cluster_members_cluster_id ON fraud_co_claim_cluster_members(cluster_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_fraud_co_claim_cluster_members_phone ON fraud_co_claim_cluster_members(phone)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_fraud_co_claim_cluster_edges_cluster_id ON fraud_co_claim_cluster_edges(cluster_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_worker_location_signals_received_at ON worker_location_signals(received_at DESC)")
 
 
 async def close_db() -> None:
@@ -303,6 +403,96 @@ async def list_workers_by_zone(zone_pincode: str) -> list[Dict[str, Any]]:
     return out
 
 
+async def upsert_worker_location_signal(
+    *,
+    phone: str,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    accuracy_meters: Optional[float] = None,
+    captured_at: Optional[str | datetime] = None,
+    tower_metadata: Optional[Dict[str, Any]] = None,
+    motion_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    now = _utc_now_iso()
+    captured_at_value: Optional[datetime]
+    if captured_at is None:
+        captured_at_value = None
+    elif isinstance(captured_at, str):
+        captured_at_value = datetime.fromisoformat(captured_at)
+    else:
+        captured_at_value = captured_at
+    tower_payload = json.dumps(tower_metadata) if tower_metadata is not None else None
+    motion_payload = json.dumps(motion_metadata) if motion_metadata is not None else None
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO worker_location_signals (
+                phone,
+                latitude,
+                longitude,
+                accuracy_meters,
+                captured_at,
+                tower_metadata_json,
+                motion_metadata_json,
+                received_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+            ON CONFLICT(phone) DO UPDATE SET
+                latitude = excluded.latitude,
+                longitude = excluded.longitude,
+                accuracy_meters = excluded.accuracy_meters,
+                captured_at = excluded.captured_at,
+                tower_metadata_json = excluded.tower_metadata_json,
+                motion_metadata_json = excluded.motion_metadata_json,
+                received_at = excluded.received_at
+            """,
+            phone,
+            latitude,
+            longitude,
+            accuracy_meters,
+            captured_at_value,
+            tower_payload,
+            motion_payload,
+            now,
+        )
+    return {
+        "phone": phone,
+        "latitude": latitude,
+        "longitude": longitude,
+        "accuracy_meters": accuracy_meters,
+        "captured_at": _to_iso(captured_at_value) if captured_at_value is not None else None,
+        "tower_metadata_json": tower_metadata,
+        "motion_metadata_json": motion_metadata,
+        "received_at": _to_iso(now),
+    }
+
+
+async def get_worker_location_signal(phone: str) -> Optional[Dict[str, Any]]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM worker_location_signals WHERE phone = $1", phone)
+    out = _row_to_dict(row)
+    if out is None:
+        return None
+    if out.get("captured_at") is not None:
+        out["captured_at"] = _to_iso(out["captured_at"])
+    out["received_at"] = _to_iso(out["received_at"])
+    return out
+
+
+async def purge_stale_worker_location_signals(*, retention_days: int) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(retention_days)))
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        deleted = await conn.execute("DELETE FROM worker_location_signals WHERE received_at < $1", cutoff)
+    # asyncpg returns "DELETE <count>"
+    parts = deleted.split()
+    if len(parts) == 2 and parts[1].isdigit():
+        return int(parts[1])
+    return 0
+
+
 async def create_claim(
     *,
     phone: str,
@@ -318,6 +508,16 @@ async def create_claim(
     anomaly_model_version: Optional[str] = None,
     anomaly_features: Optional[Dict[str, Any]] = None,
     anomaly_scored_at: Optional[str | datetime] = None,
+    llm_review_used: Optional[bool] = None,
+    llm_review_status: Optional[str] = None,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_fallback_used: Optional[bool] = None,
+    llm_decision_confidence: Optional[float] = None,
+    llm_decision_json: Optional[Dict[str, Any]] = None,
+    llm_attempts: Optional[List[Dict[str, Any]]] = None,
+    llm_validation_error: Optional[str] = None,
+    llm_scored_at: Optional[str | datetime] = None,
 ) -> Dict[str, Any]:
     now = _utc_now_iso()
     anomaly_scored_at_value: Optional[datetime]
@@ -327,7 +527,16 @@ async def create_claim(
         anomaly_scored_at_value = datetime.fromisoformat(anomaly_scored_at)
     else:
         anomaly_scored_at_value = anomaly_scored_at
+    llm_scored_at_value: Optional[datetime]
+    if llm_scored_at is None:
+        llm_scored_at_value = now if llm_review_used else None
+    elif isinstance(llm_scored_at, str):
+        llm_scored_at_value = datetime.fromisoformat(llm_scored_at)
+    else:
+        llm_scored_at_value = llm_scored_at
     anomaly_features_payload = json.dumps(anomaly_features) if anomaly_features is not None else None
+    llm_decision_payload = json.dumps(llm_decision_json) if llm_decision_json is not None else None
+    llm_attempts_payload = json.dumps(llm_attempts) if llm_attempts is not None else None
 
     pool = await _get_pool()
     async with pool.acquire() as conn:
@@ -347,9 +556,23 @@ async def create_claim(
                 anomaly_flagged,
                 anomaly_model_version,
                 anomaly_features_json,
-                anomaly_scored_at
+                anomaly_scored_at,
+                llm_review_used,
+                llm_review_status,
+                llm_provider,
+                llm_model,
+                llm_fallback_used,
+                llm_decision_confidence,
+                llm_decision_json,
+                llm_attempts_json,
+                llm_validation_error,
+                llm_scored_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13::jsonb, $14,
+                $15, $16, $17, $18, $19, $20, $21::jsonb, $22::jsonb, $23, $24
+            )
             RETURNING id
             """,
             phone,
@@ -366,6 +589,16 @@ async def create_claim(
             anomaly_model_version,
             anomaly_features_payload,
             anomaly_scored_at_value,
+            llm_review_used,
+            llm_review_status,
+            llm_provider,
+            llm_model,
+            llm_fallback_used,
+            llm_decision_confidence,
+            llm_decision_payload,
+            llm_attempts_payload,
+            llm_validation_error,
+            llm_scored_at_value,
         )
 
     return {
@@ -384,6 +617,16 @@ async def create_claim(
         "anomaly_model_version": anomaly_model_version,
         "anomaly_features_json": anomaly_features,
         "anomaly_scored_at": _to_iso(anomaly_scored_at_value) if anomaly_scored_at_value is not None else None,
+        "llm_review_used": llm_review_used,
+        "llm_review_status": llm_review_status,
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
+        "llm_fallback_used": llm_fallback_used,
+        "llm_decision_confidence": llm_decision_confidence,
+        "llm_decision_json": llm_decision_json,
+        "llm_attempts_json": llm_attempts,
+        "llm_validation_error": llm_validation_error,
+        "llm_scored_at": _to_iso(llm_scored_at_value) if llm_scored_at_value is not None else None,
     }
 
 
@@ -628,3 +871,333 @@ async def update_escalation_status(escalation_id: int, status: str, review_notes
             review_notes,
             escalation_id,
         )
+
+
+async def list_claim_events_since(since: datetime) -> list[Dict[str, Any]]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, phone, claim_type, status, amount, zone_pincode, source, created_at
+            FROM claims
+            WHERE created_at >= $1
+            ORDER BY created_at ASC
+            """,
+            since,
+        )
+    out = _rows_to_dicts(rows)
+    for item in out:
+        item["created_at"] = _to_iso(item["created_at"])
+    return out
+
+
+async def create_fraud_cluster_run(
+    *,
+    lookback_days: int,
+    time_bucket_minutes: int,
+    min_edge_support: int,
+    medium_risk_threshold: float,
+    high_risk_threshold: float,
+) -> Dict[str, Any]:
+    now = _utc_now_iso()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        run_id = await conn.fetchval(
+            """
+            INSERT INTO fraud_cluster_runs (
+                started_at,
+                status,
+                lookback_days,
+                time_bucket_minutes,
+                min_edge_support,
+                medium_risk_threshold,
+                high_risk_threshold,
+                claims_scanned,
+                edge_count,
+                cluster_count,
+                flagged_cluster_count,
+                created_at
+            )
+            VALUES ($1, 'running', $2, $3, $4, $5, $6, 0, 0, 0, 0, $1)
+            RETURNING id
+            """,
+            now,
+            int(lookback_days),
+            int(time_bucket_minutes),
+            int(min_edge_support),
+            float(medium_risk_threshold),
+            float(high_risk_threshold),
+        )
+    return {
+        "id": int(run_id),
+        "started_at": _to_iso(now),
+        "status": "running",
+    }
+
+
+async def finalize_fraud_cluster_run(
+    run_id: int,
+    *,
+    status: str,
+    claims_scanned: int,
+    edge_count: int,
+    cluster_count: int,
+    flagged_cluster_count: int,
+    error_message: Optional[str] = None,
+) -> None:
+    now = _utc_now_iso()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE fraud_cluster_runs
+            SET finished_at = $1,
+                status = $2,
+                claims_scanned = $3,
+                edge_count = $4,
+                cluster_count = $5,
+                flagged_cluster_count = $6,
+                error_message = $7
+            WHERE id = $8
+            """,
+            now,
+            status,
+            int(claims_scanned),
+            int(edge_count),
+            int(cluster_count),
+            int(flagged_cluster_count),
+            error_message,
+            int(run_id),
+        )
+
+
+async def save_fraud_co_claim_clusters(run_id: int, clusters: List[Dict[str, Any]]) -> int:
+    now = _utc_now_iso()
+    pool = await _get_pool()
+    persisted = 0
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for cluster in clusters:
+                cluster_id = await conn.fetchval(
+                    """
+                    INSERT INTO fraud_co_claim_clusters (
+                        run_id,
+                        cluster_key,
+                        risk_score,
+                        risk_level,
+                        member_count,
+                        edge_count,
+                        event_count,
+                        frequency_score,
+                        recency_score,
+                        supporting_metadata_json,
+                        created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+                    RETURNING id
+                    """,
+                    int(run_id),
+                    str(cluster.get("cluster_key", "")),
+                    float(cluster.get("risk_score", 0.0)),
+                    str(cluster.get("risk_level", "low")),
+                    int(cluster.get("member_count", 0)),
+                    int(cluster.get("edge_count", 0)),
+                    int(cluster.get("event_count", 0)),
+                    float(cluster.get("frequency_score", 0.0)),
+                    float(cluster.get("recency_score", 0.0)),
+                    json.dumps(cluster.get("supporting_metadata", {})),
+                    now,
+                )
+
+                members = cluster.get("members", [])
+                if isinstance(members, list):
+                    for member in members:
+                        first_claim_at = member.get("first_claim_at")
+                        last_claim_at = member.get("last_claim_at")
+                        first_claim_at_value = (
+                            datetime.fromisoformat(first_claim_at)
+                            if isinstance(first_claim_at, str) and first_claim_at
+                            else None
+                        )
+                        last_claim_at_value = (
+                            datetime.fromisoformat(last_claim_at)
+                            if isinstance(last_claim_at, str) and last_claim_at
+                            else None
+                        )
+                        await conn.execute(
+                            """
+                            INSERT INTO fraud_co_claim_cluster_members (
+                                cluster_id,
+                                phone,
+                                claim_count,
+                                first_claim_at,
+                                last_claim_at,
+                                created_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                            """,
+                            int(cluster_id),
+                            str(member.get("phone", "")),
+                            int(member.get("claim_count", 0)),
+                            first_claim_at_value,
+                            last_claim_at_value,
+                            now,
+                        )
+
+                edges = cluster.get("edges", [])
+                if isinstance(edges, list):
+                    for edge in edges:
+                        last_co_claim_at = edge.get("last_co_claim_at")
+                        last_co_claim_at_value = (
+                            datetime.fromisoformat(last_co_claim_at)
+                            if isinstance(last_co_claim_at, str) and last_co_claim_at
+                            else None
+                        )
+                        await conn.execute(
+                            """
+                            INSERT INTO fraud_co_claim_cluster_edges (
+                                cluster_id,
+                                phone_a,
+                                phone_b,
+                                co_claim_count,
+                                recency_weight,
+                                edge_weight,
+                                last_co_claim_at,
+                                supporting_metadata_json,
+                                created_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                            """,
+                            int(cluster_id),
+                            str(edge.get("phone_a", "")),
+                            str(edge.get("phone_b", "")),
+                            int(edge.get("co_claim_count", 0)),
+                            float(edge.get("recency_weight", 0.0)),
+                            float(edge.get("edge_weight", 0.0)),
+                            last_co_claim_at_value,
+                            json.dumps(edge.get("supporting_metadata", {})),
+                            now,
+                        )
+                persisted += 1
+    return persisted
+
+
+async def list_fraud_cluster_runs(limit: int = 20) -> list[Dict[str, Any]]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT *
+            FROM fraud_cluster_runs
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            max(1, int(limit)),
+        )
+    out = _rows_to_dicts(rows)
+    for item in out:
+        item["created_at"] = _to_iso(item["created_at"])
+        item["started_at"] = _to_iso(item["started_at"])
+        if item.get("finished_at") is not None:
+            item["finished_at"] = _to_iso(item["finished_at"])
+    return out
+
+
+async def get_latest_fraud_cluster_run() -> Optional[Dict[str, Any]]:
+    rows = await list_fraud_cluster_runs(limit=1)
+    if not rows:
+        return None
+    return rows[0]
+
+
+async def list_fraud_clusters(
+    *,
+    run_id: Optional[int] = None,
+    risk_level: Optional[str] = None,
+    flagged_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Dict[str, Any]]:
+    query = """
+        SELECT *
+        FROM fraud_co_claim_clusters
+        WHERE 1 = 1
+    """
+    params: list[Any] = []
+    if run_id is not None:
+        params.append(int(run_id))
+        query += f" AND run_id = ${len(params)}"
+    if risk_level:
+        params.append(risk_level.strip().lower())
+        query += f" AND LOWER(risk_level) = ${len(params)}"
+    if flagged_only:
+        query += " AND LOWER(risk_level) IN ('medium', 'high')"
+
+    params.append(max(1, int(limit)))
+    query += f" ORDER BY risk_score DESC, id DESC LIMIT ${len(params)}"
+    params.append(max(0, int(offset)))
+    query += f" OFFSET ${len(params)}"
+
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+
+    out = _rows_to_dicts(rows)
+    for item in out:
+        item["created_at"] = _to_iso(item["created_at"])
+    return out
+
+
+async def get_fraud_cluster(cluster_id: int) -> Optional[Dict[str, Any]]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM fraud_co_claim_clusters WHERE id = $1", int(cluster_id))
+    out = _row_to_dict(row)
+    if out is None:
+        return None
+    out["created_at"] = _to_iso(out["created_at"])
+    return out
+
+
+async def list_fraud_cluster_members(cluster_id: int) -> list[Dict[str, Any]]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT *
+            FROM fraud_co_claim_cluster_members
+            WHERE cluster_id = $1
+            ORDER BY claim_count DESC, phone ASC
+            """,
+            int(cluster_id),
+        )
+    out = _rows_to_dicts(rows)
+    for item in out:
+        item["created_at"] = _to_iso(item["created_at"])
+        if item.get("first_claim_at") is not None:
+            item["first_claim_at"] = _to_iso(item["first_claim_at"])
+        if item.get("last_claim_at") is not None:
+            item["last_claim_at"] = _to_iso(item["last_claim_at"])
+    return out
+
+
+async def list_fraud_cluster_edges(cluster_id: int, limit: int = 200) -> list[Dict[str, Any]]:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT *
+            FROM fraud_co_claim_cluster_edges
+            WHERE cluster_id = $1
+            ORDER BY edge_weight DESC, co_claim_count DESC
+            LIMIT $2
+            """,
+            int(cluster_id),
+            max(1, int(limit)),
+        )
+    out = _rows_to_dicts(rows)
+    for item in out:
+        item["created_at"] = _to_iso(item["created_at"])
+        if item.get("last_co_claim_at") is not None:
+            item["last_co_claim_at"] = _to_iso(item["last_co_claim_at"])
+    return out

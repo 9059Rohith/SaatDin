@@ -6,12 +6,13 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import auth, claims, health, plans, platforms, policy, triggers, workers, zones
+from .api import auth, claims, fraud_clusters, health, plans, platforms, policy, triggers, workers, zones
 from .core.config import settings
 from .core.db import close_db, init_db
 from .core.logging import configure_logging
 from .core.zone_cache import load_zone_map
 from .services.trigger_monitor import trigger_monitor
+from .services.co_claim_monitor import co_claim_cluster_monitor
 from .services.ml_premium import initialize_premium_model
 from .services.external_apis import initialize_api_client, close_api_client
 from .services.fraud_isolation import initialize_fraud_model
@@ -36,8 +37,10 @@ async def lifespan(_: FastAPI):
     await initialize_api_client()
     
     await trigger_monitor.start()
+    await co_claim_cluster_monitor.start()
     logger.info("app_started")
     yield
+    await co_claim_cluster_monitor.stop()
     await trigger_monitor.stop()
     await close_api_client()
     await close_db()
@@ -68,3 +71,4 @@ app.include_router(policy.router, prefix="/api/v1/policy")
 app.include_router(claims.router, prefix="/api/v1/claims")
 app.include_router(workers.router, prefix="/api/v1")
 app.include_router(triggers.router, prefix="/api/v1/triggers")
+app.include_router(fraud_clusters.router, prefix="/api/v1/fraud")

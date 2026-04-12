@@ -155,8 +155,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -236,10 +234,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                     opacity: _fadeAnims[index],
                     child: SlideTransition(
                       position: _slideAnims[index],
-                      child: _SlideContent(
-                        slide: slide,
-                        screenHeight: size.height,
-                      ),
+                      child: _SlideContent(slide: slide),
                     ),
                   );
                 },
@@ -344,93 +339,92 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
 class _SlideContent extends StatelessWidget {
   final _OnboardingSlide slide;
-  final double screenHeight;
 
-  const _SlideContent({
-    required this.slide,
-    required this.screenHeight,
-  });
+  const _SlideContent({required this.slide});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Column(
-        children: [
-          SizedBox(height: screenHeight * 0.05),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final contentHeight = constraints.maxHeight.isFinite
+              ? constraints.maxHeight
+              : MediaQuery.sizeOf(context).height;
+          return Column(
+            children: [
+              SizedBox(height: contentHeight * 0.05),
 
-          // ── Illustration card ──────────────────────────────────────
-          Container(
-            width: double.infinity,
-            height: screenHeight * 0.34,
-            decoration: BoxDecoration(
-              color: slide.iconBg,
-              borderRadius: BorderRadius.circular(28),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // Halo circle behind icon
-                Container(
-                  width: 130,
-                  height: 130,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: slide.iconColor.withValues(alpha: 0.12),
-                  ),
+              // ── Illustration card ──────────────────────────────────────
+              Container(
+                width: double.infinity,
+                height: contentHeight * 0.34,
+                decoration: BoxDecoration(
+                  color: slide.iconBg,
+                  borderRadius: BorderRadius.circular(28),
                 ),
-                Icon(
-                  slide.icon,
-                  size: 80,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Halo circle behind icon
+                    Container(
+                      width: 130,
+                      height: 130,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: slide.iconColor.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    Icon(slide.icon, size: 80, color: slide.iconColor),
+                  ],
+                ),
+              ),
+
+              SizedBox(height: contentHeight * 0.045),
+
+              // ── Headline ───────────────────────────────────────────────
+              Text(
+                slide.headline,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.montserrat(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                  letterSpacing: -0.5,
+                  height: 1.2,
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              // ── Subheadline ────────────────────────────────────────────
+              Text(
+                slide.subheadline,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                   color: slide.iconColor,
+                  letterSpacing: 0.2,
                 ),
-              ],
-            ),
-          ),
+              ),
 
-          SizedBox(height: screenHeight * 0.045),
+              const SizedBox(height: 16),
 
-          // ── Headline ───────────────────────────────────────────────
-          Text(
-            slide.headline,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.montserrat(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-              letterSpacing: -0.5,
-              height: 1.2,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          // ── Subheadline ────────────────────────────────────────────
-          Text(
-            slide.subheadline,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: slide.iconColor,
-              letterSpacing: 0.2,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // ── Body copy ──────────────────────────────────────────────
-          Text(
-            slide.body,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 15,
-              fontWeight: FontWeight.w400,
-              color: AppColors.textSecondary,
-              height: 1.55,
-            ),
-          ),
-        ],
+              // ── Body copy ──────────────────────────────────────────────
+              Text(
+                slide.body,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  color: AppColors.textSecondary,
+                  height: 1.55,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

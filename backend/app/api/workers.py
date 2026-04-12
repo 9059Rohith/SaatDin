@@ -3,14 +3,32 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.db import get_worker, upsert_worker
+from ..core.config import settings
+from ..core.db import (
+    get_worker,
+    purge_stale_worker_location_signals,
+    total_settled_amount_for_phone,
+    upsert_worker,
+    upsert_worker_location_signal,
+)
 from ..core.dependencies import get_current_phone, get_current_worker
 from ..core.phone import normalize_phone_number
 from ..core.zone_cache import resolve_zone, supports_platform
 from ..models.platform import Platform
-from ..models.schemas import ApiResponse, RegisterRequest, WorkerOut, WorkerStatusOut
+from ..models.schemas import (
+    ApiResponse,
+    LocationSignalValidationOut,
+    MotionValidationOut,
+    RegisterRequest,
+    TowerValidationOut,
+    WorkerLocationSignalRequest,
+    WorkerOut,
+    WorkerStatusOut,
+)
+from ..services.tower_validation import evaluate_worker_tower_signal
+from ..services.motion_validation import evaluate_worker_motion_signal
 from ..services.premium import build_plans
-from ..core.db import total_settled_amount_for_phone
+from ..services.trigger_monitor import update_worker_gps
 
 router = APIRouter(tags=["workers"])
 logger = logging.getLogger(__name__)
@@ -113,3 +131,72 @@ async def get_my_worker(worker: dict = Depends(get_current_worker)) -> ApiRespon
         earningsProtected=round(settled_total),
     )
     return ApiResponse(success=True, data=out)
+
+
+@router.post("/workers/location-signal", response_model=ApiResponse)
+async def ingest_location_signal(payload: WorkerLocationSignalRequest, worker: dict = Depends(get_current_worker)) -> ApiResponse:
+    phone = str(worker["phone"])
+    zone_pincode = str(worker["zone_pincode"])
+    tower_metadata = payload.towerMetadata.model_dump(exclude_none=True) if payload.towerMetadata is not None else None
+    motion_metadata = payload.motionMetadata.model_dump(exclude_none=True) if payload.motionMetadata is not None else None
+
+    await upsert_worker_location_signal(
+        phone=phone,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        accuracy_meters=payload.accuracyMeters,
+        captured_at=payload.capturedAt,
+        tower_metadata=tower_metadata,
+        motion_metadata=motion_metadata,
+    )
+    purged = await purge_stale_worker_location_signals(retention_days=settings.motion_signal_retention_days)
+    if payload.latitude is not None and payload.longitude is not None:
+        update_worker_gps(phone, payload.latitude, payload.longitude)
+
+    _, zone_data = resolve_zone(zone_pincode)
+    coords = zone_data.get("coordinates_approx", {})
+    zone_lat = float(zone_data.get("latitude", coords.get("lat", 12.97)))
+    zone_lon = float(zone_data.get("longitude", coords.get("lon", 77.59)))
+    validation = await evaluate_worker_tower_signal(
+        phone=phone,
+        claimed_zone_pincode=zone_pincode,
+        zone_lat=zone_lat,
+        zone_lon=zone_lon,
+    )
+    motion = await evaluate_worker_motion_signal(phone=phone)
+    logger.info(
+        "worker_location_signal_ingested phone=%s tower_status=%s tower_confidence=%.3f motion_status=%s motion_confidence=%.3f purged=%s",
+        phone,
+        validation["status"],
+        float(validation["confidence"]),
+        motion["status"],
+        float(motion["confidence"]),
+        purged,
+    )
+    return ApiResponse(
+        success=True,
+        data=LocationSignalValidationOut(
+            tower=TowerValidationOut(
+                status=str(validation["status"]),
+                confidence=float(validation["confidence"]),
+                reason=str(validation["reason"]),
+                signalPresent=bool(validation.get("signal_present", False)),
+                signalReceivedAt=str(validation["signal_received_at"]) if validation.get("signal_received_at") is not None else None,
+                signalAgeMinutes=float(validation["signal_age_minutes"])
+                if validation.get("signal_age_minutes") is not None
+                else None,
+            ),
+            motion=MotionValidationOut(
+                status=str(motion["status"]),
+                confidence=float(motion["confidence"]),
+                reason=str(motion["reason"]),
+                eligible=bool(motion.get("eligible", False)),
+                signalPresent=bool(motion.get("signal_present", False)),
+                signalReceivedAt=str(motion["signal_received_at"]) if motion.get("signal_received_at") is not None else None,
+                signalAgeMinutes=float(motion["signal_age_minutes"])
+                if motion.get("signal_age_minutes") is not None
+                else None,
+            ),
+        ),
+        message="Location signal accepted",
+    )

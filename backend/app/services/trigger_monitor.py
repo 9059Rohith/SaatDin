@@ -13,6 +13,8 @@ from ..core.zone_cache import load_zone_map, resolve_zone
 from .premium import build_plans
 from .external_apis import get_api_client, TRIGGER_THRESHOLDS
 from .fraud_isolation import score_claim
+from .motion_validation import evaluate_worker_motion_signal, motion_features_from_validation
+from .tower_validation import evaluate_worker_tower_signal, tower_features_from_validation
 from ..models.platform import Platform
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,21 @@ _TRIGGER_PAYOUT_FACTORS = {
     "zonelock": 1.00,
     "heat": 0.60,
 }
+
+
+async def _tower_features_for_worker(phone: str, pincode: str, zone_lat: float, zone_lon: float) -> Dict[str, Any]:
+    validation = await evaluate_worker_tower_signal(
+        phone=phone,
+        claimed_zone_pincode=pincode,
+        zone_lat=zone_lat,
+        zone_lon=zone_lon,
+    )
+    return tower_features_from_validation(validation)
+
+
+async def _motion_features_for_worker(phone: str) -> Dict[str, Any]:
+    validation = await evaluate_worker_motion_signal(phone=phone)
+    return motion_features_from_validation(validation)
 
 
 def _claim_type_to_alert_key(claim_type: str) -> str:
@@ -108,6 +125,8 @@ async def force_trigger_for_zone(
             "aqi_risk_score": float(zone.get("aqi_risk_score", 0.5)),
             "traffic_congestion_score": float(zone.get("traffic_congestion_score", 0.5)),
         }
+        anomaly_features.update(await _tower_features_for_worker(phone, pincode, zone_lat, zone_lon))
+        anomaly_features.update(await _motion_features_for_worker(phone))
         anomaly = score_claim(
             anomaly_features,
             context={
@@ -133,6 +152,20 @@ async def force_trigger_for_zone(
             anomaly_model_version=str(anomaly["anomaly_model_version"]),
             anomaly_features=dict(anomaly["anomaly_features"]),
             anomaly_scored_at=str(anomaly["anomaly_scored_at"]),
+            llm_review_used=bool(anomaly["llm_review_used"]) if anomaly.get("llm_review_used") is not None else None,
+            llm_review_status=str(anomaly["llm_review_status"]) if anomaly.get("llm_review_status") is not None else None,
+            llm_provider=str(anomaly["llm_provider"]) if anomaly.get("llm_provider") is not None else None,
+            llm_model=str(anomaly["llm_model"]) if anomaly.get("llm_model") is not None else None,
+            llm_fallback_used=bool(anomaly["llm_fallback_used"]) if anomaly.get("llm_fallback_used") is not None else None,
+            llm_decision_confidence=float(anomaly["llm_decision_confidence"])
+            if anomaly.get("llm_decision_confidence") is not None
+            else None,
+            llm_decision_json=anomaly.get("llm_decision_json"),
+            llm_attempts=anomaly.get("llm_attempts"),
+            llm_validation_error=str(anomaly["llm_validation_error"])
+            if anomaly.get("llm_validation_error") is not None
+            else None,
+            llm_scored_at=str(anomaly["llm_scored_at"]) if anomaly.get("llm_scored_at") is not None else None,
         )
         created += 1
 
@@ -445,6 +478,8 @@ async def refresh_live_trigger_state() -> None:
                 "aqi_risk_score": float(zone.get("aqi_risk_score", 0.5)),
                 "traffic_congestion_score": float(zone.get("traffic_congestion_score", 0.5)),
             }
+            anomaly_features.update(await _tower_features_for_worker(phone, pincode, zone_lat, zone_lon))
+            anomaly_features.update(await _motion_features_for_worker(phone))
             anomaly = score_claim(
                 anomaly_features,
                 context={
@@ -468,6 +503,20 @@ async def refresh_live_trigger_state() -> None:
                 anomaly_model_version=str(anomaly["anomaly_model_version"]),
                 anomaly_features=dict(anomaly["anomaly_features"]),
                 anomaly_scored_at=str(anomaly["anomaly_scored_at"]),
+                llm_review_used=bool(anomaly["llm_review_used"]) if anomaly.get("llm_review_used") is not None else None,
+                llm_review_status=str(anomaly["llm_review_status"]) if anomaly.get("llm_review_status") is not None else None,
+                llm_provider=str(anomaly["llm_provider"]) if anomaly.get("llm_provider") is not None else None,
+                llm_model=str(anomaly["llm_model"]) if anomaly.get("llm_model") is not None else None,
+                llm_fallback_used=bool(anomaly["llm_fallback_used"]) if anomaly.get("llm_fallback_used") is not None else None,
+                llm_decision_confidence=float(anomaly["llm_decision_confidence"])
+                if anomaly.get("llm_decision_confidence") is not None
+                else None,
+                llm_decision_json=anomaly.get("llm_decision_json"),
+                llm_attempts=anomaly.get("llm_attempts"),
+                llm_validation_error=str(anomaly["llm_validation_error"])
+                if anomaly.get("llm_validation_error") is not None
+                else None,
+                llm_scored_at=str(anomaly["llm_scored_at"]) if anomaly.get("llm_scored_at") is not None else None,
             )
             logger.info(
                 f"auto_claim_created phone={phone} claim_type={claim_type} payout={payout} status={claim_status} anomaly_score={anomaly['anomaly_score']:.6f} anomaly_flagged={anomaly['anomaly_flagged']} zone_affinity={zone_affinity:.2f} data_source={state.get('dataSource')}"

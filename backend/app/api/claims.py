@@ -11,6 +11,8 @@ from ..core.dependencies import get_current_worker
 from ..core.zone_cache import resolve_zone
 from ..models.schemas import ApiResponse, ClaimOut, ClaimSubmitRequest, ClaimEscalateRequest, ClaimEscalationOut
 from ..services.fraud_isolation import score_claim
+from ..services.motion_validation import evaluate_worker_motion_signal, motion_features_from_validation
+from ..services.tower_validation import evaluate_worker_tower_signal, tower_features_from_validation
 from ..services.trigger_monitor import calculate_zone_affinity_score, get_fraud_ring_members
 
 router = APIRouter(tags=["claims"])
@@ -50,6 +52,30 @@ def _to_claim_out(row: dict) -> ClaimOut:
             anomaly_features_raw = None
     anomaly_features = anomaly_features_raw if isinstance(anomaly_features_raw, dict) else None
     anomaly_scored_at = row.get("anomaly_scored_at")
+    llm_decision_raw = row.get("llm_decision_json")
+    if isinstance(llm_decision_raw, str):
+        try:
+            llm_decision_raw = json.loads(llm_decision_raw)
+        except json.JSONDecodeError:
+            llm_decision_raw = None
+    llm_decision = llm_decision_raw if isinstance(llm_decision_raw, dict) else None
+
+    llm_attempts_raw = row.get("llm_attempts_json")
+    if isinstance(llm_attempts_raw, str):
+        try:
+            llm_attempts_raw = json.loads(llm_attempts_raw)
+        except json.JSONDecodeError:
+            llm_attempts_raw = None
+    llm_attempts = llm_attempts_raw if isinstance(llm_attempts_raw, list) else None
+    llm_scored_at = row.get("llm_scored_at")
+    tower_status = anomaly_features.get("tower_validation_status") if isinstance(anomaly_features, dict) else None
+    tower_confidence_raw = anomaly_features.get("tower_zone_confidence") if isinstance(anomaly_features, dict) else None
+    tower_reason = anomaly_features.get("tower_validation_reason") if isinstance(anomaly_features, dict) else None
+    tower_received_at = anomaly_features.get("tower_signal_received_at") if isinstance(anomaly_features, dict) else None
+    motion_status = anomaly_features.get("motion_validation_status") if isinstance(anomaly_features, dict) else None
+    motion_confidence_raw = anomaly_features.get("motion_confidence") if isinstance(anomaly_features, dict) else None
+    motion_reason = anomaly_features.get("motion_validation_reason") if isinstance(anomaly_features, dict) else None
+    motion_received_at = anomaly_features.get("motion_signal_received_at") if isinstance(anomaly_features, dict) else None
 
     return ClaimOut(
         id=f"#C{int(row['id']):05d}",
@@ -65,6 +91,26 @@ def _to_claim_out(row: dict) -> ClaimOut:
         anomalyModelVersion=str(row["anomaly_model_version"]) if row.get("anomaly_model_version") is not None else None,
         anomalyScoredAt=str(anomaly_scored_at) if anomaly_scored_at is not None else None,
         anomalyFeaturesJson=anomaly_features,
+        llmReviewUsed=bool(row["llm_review_used"]) if row.get("llm_review_used") is not None else None,
+        llmReviewStatus=str(row["llm_review_status"]) if row.get("llm_review_status") is not None else None,
+        llmProvider=str(row["llm_provider"]) if row.get("llm_provider") is not None else None,
+        llmModel=str(row["llm_model"]) if row.get("llm_model") is not None else None,
+        llmFallbackUsed=bool(row["llm_fallback_used"]) if row.get("llm_fallback_used") is not None else None,
+        llmDecisionConfidence=float(row["llm_decision_confidence"])
+        if row.get("llm_decision_confidence") is not None
+        else None,
+        llmDecisionJson=llm_decision,
+        llmAttemptsJson=llm_attempts,
+        llmValidationError=str(row["llm_validation_error"]) if row.get("llm_validation_error") is not None else None,
+        llmScoredAt=str(llm_scored_at) if llm_scored_at is not None else None,
+        towerValidationStatus=str(tower_status) if tower_status is not None else None,
+        towerZoneConfidence=float(tower_confidence_raw) if isinstance(tower_confidence_raw, (float, int)) else None,
+        towerValidationReason=str(tower_reason) if tower_reason is not None else None,
+        towerSignalReceivedAt=str(tower_received_at) if tower_received_at is not None else None,
+        motionValidationStatus=str(motion_status) if motion_status is not None else None,
+        motionConfidence=float(motion_confidence_raw) if isinstance(motion_confidence_raw, (float, int)) else None,
+        motionValidationReason=str(motion_reason) if motion_reason is not None else None,
+        motionSignalReceivedAt=str(motion_received_at) if motion_received_at is not None else None,
     )
 
 
@@ -82,8 +128,15 @@ async def _build_manual_claim_features(worker: dict, amount: float) -> dict:
         phone,
         datetime.now(timezone.utc) - timedelta(hours=24),
     )
+    tower_validation = await evaluate_worker_tower_signal(
+        phone=phone,
+        claimed_zone_pincode=zone_pincode,
+        zone_lat=zone_lat,
+        zone_lon=zone_lon,
+    )
+    motion_validation = await evaluate_worker_motion_signal(phone=phone)
 
-    return {
+    features = {
         "zone_affinity_score": zone_affinity,
         "fraud_ring_size": float(fraud_ring_size),
         "recent_claims_24h": float(recent_claims_24h),
@@ -95,6 +148,9 @@ async def _build_manual_claim_features(worker: dict, amount: float) -> dict:
         "aqi_risk_score": float(zone_data.get("aqi_risk_score", 0.5)),
         "traffic_congestion_score": float(zone_data.get("traffic_congestion_score", 0.5)),
     }
+    features.update(tower_features_from_validation(tower_validation))
+    features.update(motion_features_from_validation(motion_validation))
+    return features
 
 
 @router.get("", response_model=ApiResponse)
@@ -134,6 +190,20 @@ async def submit_claim(payload: ClaimSubmitRequest, worker: dict = Depends(get_c
         anomaly_model_version=str(anomaly["anomaly_model_version"]),
         anomaly_features=dict(anomaly["anomaly_features"]),
         anomaly_scored_at=str(anomaly["anomaly_scored_at"]),
+        llm_review_used=bool(anomaly["llm_review_used"]) if anomaly.get("llm_review_used") is not None else None,
+        llm_review_status=str(anomaly["llm_review_status"]) if anomaly.get("llm_review_status") is not None else None,
+        llm_provider=str(anomaly["llm_provider"]) if anomaly.get("llm_provider") is not None else None,
+        llm_model=str(anomaly["llm_model"]) if anomaly.get("llm_model") is not None else None,
+        llm_fallback_used=bool(anomaly["llm_fallback_used"]) if anomaly.get("llm_fallback_used") is not None else None,
+        llm_decision_confidence=float(anomaly["llm_decision_confidence"])
+        if anomaly.get("llm_decision_confidence") is not None
+        else None,
+        llm_decision_json=anomaly.get("llm_decision_json"),
+        llm_attempts=anomaly.get("llm_attempts"),
+        llm_validation_error=str(anomaly["llm_validation_error"])
+        if anomaly.get("llm_validation_error") is not None
+        else None,
+        llm_scored_at=str(anomaly["llm_scored_at"]) if anomaly.get("llm_scored_at") is not None else None,
     )
     out = _to_claim_out(row)
     logger.info(
