@@ -295,67 +295,88 @@ async def overview(_admin: dict[str, Any] = Depends(_require_admin)) -> ApiRespo
         zones = load_zone_map()
     except Exception:
         zones = {}
-    has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
-    has_zonelock_reports = await _table_exists("zonelock_reports")
+    try:
+        has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
+        has_zonelock_reports = await _table_exists("zonelock_reports")
 
-    pending_plan_changes_query = (
-        "SELECT COUNT(*) FROM workers WHERE pending_plan_name IS NOT NULL"
-        if has_pending_plan_name
-        else "SELECT 0"
-    )
-    pending_zonelock_reports_query = (
-        "SELECT COUNT(*) FROM zonelock_reports WHERE status = 'pending'"
-        if has_zonelock_reports
-        else "SELECT 0"
-    )
+        pending_plan_changes_query = (
+            "SELECT COUNT(*) FROM workers WHERE pending_plan_name IS NOT NULL"
+            if has_pending_plan_name
+            else "SELECT 0"
+        )
+        pending_zonelock_reports_query = (
+            "SELECT COUNT(*) FROM zonelock_reports WHERE status = 'pending'"
+            if has_zonelock_reports
+            else "SELECT 0"
+        )
 
-    totals = {
-        "zones": len(zones),
-        "workers": int(await _fetch_value("SELECT COUNT(*) FROM workers", [] ) or 0),
-        "claims": int(await _fetch_value("SELECT COUNT(*) FROM claims", []) or 0),
-        "settledClaims": int(
-            await _fetch_value("SELECT COUNT(*) FROM claims WHERE status = 'settled'", []) or 0
-        ),
-        "pendingEscalations": int(
-            await _fetch_value("SELECT COUNT(*) FROM claim_escalations WHERE status = 'pending_review'", []) or 0
-        ),
-        "pendingZoneLockReports": int(
-            await _fetch_value(pending_zonelock_reports_query, []) or 0
-        ),
-        "totalSettledAmount": float(
-            await _fetch_value("SELECT COALESCE(SUM(amount), 0) FROM claims WHERE status = 'settled'", []) or 0
-        ),
-        "pendingPlanChanges": int(
-            await _fetch_value(pending_plan_changes_query, []) or 0
-        ),
-    }
+        totals = {
+            "zones": len(zones),
+            "workers": int(await _fetch_value("SELECT COUNT(*) FROM workers", [] ) or 0),
+            "claims": int(await _fetch_value("SELECT COUNT(*) FROM claims", []) or 0),
+            "settledClaims": int(
+                await _fetch_value("SELECT COUNT(*) FROM claims WHERE status = 'settled'", []) or 0
+            ),
+            "pendingEscalations": int(
+                await _fetch_value("SELECT COUNT(*) FROM claim_escalations WHERE status = 'pending_review'", []) or 0
+            ),
+            "pendingZoneLockReports": int(
+                await _fetch_value(pending_zonelock_reports_query, []) or 0
+            ),
+            "totalSettledAmount": float(
+                await _fetch_value("SELECT COALESCE(SUM(amount), 0) FROM claims WHERE status = 'settled'", []) or 0
+            ),
+            "pendingPlanChanges": int(
+                await _fetch_value(pending_plan_changes_query, []) or 0
+            ),
+        }
 
-    claim_status_rows = await _fetch_rows(
-        "SELECT status, COUNT(*) AS total FROM claims GROUP BY status ORDER BY status",
-        [],
-    )
-    escalation_status_rows = await _fetch_rows(
-        "SELECT status, COUNT(*) AS total FROM claim_escalations GROUP BY status ORDER BY status",
-        [],
-    )
-    report_status_rows = (
-        await _fetch_rows(
-            "SELECT status, COUNT(*) AS total FROM zonelock_reports GROUP BY status ORDER BY status",
+        claim_status_rows = await _fetch_rows(
+            "SELECT status, COUNT(*) AS total FROM claims GROUP BY status ORDER BY status",
             [],
         )
-        if has_zonelock_reports
-        else []
-    )
+        escalation_status_rows = await _fetch_rows(
+            "SELECT status, COUNT(*) AS total FROM claim_escalations GROUP BY status ORDER BY status",
+            [],
+        )
+        report_status_rows = (
+            await _fetch_rows(
+                "SELECT status, COUNT(*) AS total FROM zonelock_reports GROUP BY status ORDER BY status",
+                [],
+            )
+            if has_zonelock_reports
+            else []
+        )
 
-    return ApiResponse(
-        success=True,
-        data={
-            "totals": totals,
-            "claimStatusCounts": {str(row["status"]): int(row["total"]) for row in claim_status_rows},
-            "escalationStatusCounts": {str(row["status"]): int(row["total"]) for row in escalation_status_rows},
-            "reportStatusCounts": {str(row["status"]): int(row["total"]) for row in report_status_rows},
-        },
-    )
+        return ApiResponse(
+            success=True,
+            data={
+                "totals": totals,
+                "claimStatusCounts": {str(row["status"]): int(row["total"]) for row in claim_status_rows},
+                "escalationStatusCounts": {str(row["status"]): int(row["total"]) for row in escalation_status_rows},
+                "reportStatusCounts": {str(row["status"]): int(row["total"]) for row in report_status_rows},
+            },
+        )
+    except Exception:
+        return ApiResponse(
+            success=True,
+            data={
+                "totals": {
+                    "zones": len(zones),
+                    "workers": 0,
+                    "claims": 0,
+                    "settledClaims": 0,
+                    "pendingEscalations": 0,
+                    "pendingZoneLockReports": 0,
+                    "totalSettledAmount": 0.0,
+                    "pendingPlanChanges": 0,
+                },
+                "claimStatusCounts": {},
+                "escalationStatusCounts": {},
+                "reportStatusCounts": {},
+            },
+            message="Overview temporarily unavailable",
+        )
 
 
 @router.get("/workers", response_model=ApiResponse)
