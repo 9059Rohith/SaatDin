@@ -291,7 +291,10 @@ async def session(request: Request) -> ApiResponse:
 
 @router.get("/overview", response_model=ApiResponse)
 async def overview(_admin: dict[str, Any] = Depends(_require_admin)) -> ApiResponse:
-    zones = load_zone_map()
+    try:
+        zones = load_zone_map()
+    except Exception:
+        zones = {}
     has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
     has_zonelock_reports = await _table_exists("zonelock_reports")
 
