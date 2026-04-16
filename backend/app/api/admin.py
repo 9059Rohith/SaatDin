@@ -207,6 +207,19 @@ def _format_escalation(row: dict[str, Any]) -> dict[str, Any]:
 
 def _format_report(row: dict[str, Any]) -> dict[str, Any]:
     report_id = int(row["id"])
+    confidence_raw = row.get("confidence")
+    verified_count_raw = row.get("verified_count")
+
+    try:
+        confidence_value = float(confidence_raw) if confidence_raw is not None else 0.0
+    except (TypeError, ValueError):
+        confidence_value = 0.0
+
+    try:
+        verified_count_value = int(verified_count_raw) if verified_count_raw is not None else 0
+    except (TypeError, ValueError):
+        verified_count_value = 0
+
     return {
         "id": report_id,
         "reportRef": _report_ref(report_id),
@@ -217,8 +230,8 @@ def _format_report(row: dict[str, Any]) -> dict[str, Any]:
         "zoneName": str(row["zone_name"]),
         "description": str(row["description"]),
         "status": str(row["status"]),
-        "confidence": float(row["confidence"]),
-        "verifiedCount": int(row["verified_count"]),
+        "confidence": confidence_value,
+        "verifiedCount": verified_count_value,
         "createdAt": _to_iso(row.get("created_at")),
     }
 
