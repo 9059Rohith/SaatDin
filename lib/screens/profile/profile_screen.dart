@@ -5,6 +5,7 @@ import '../../models/claim_model.dart';
 import '../../models/user_model.dart';
 import '../../routes/app_routes.dart';
 import '../../services/api_service.dart';
+import '../../services/external_link_opener.dart';
 import '../../services/tab_router.dart';
 import '../../theme/app_colors.dart';
 
@@ -12,6 +13,10 @@ class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
   static final ApiService _apiService = ApiService();
+  static final Uri _adminConsoleUri = Uri.parse(
+    'https://saatdin.onrender.com/admin',
+  );
+  static final Uri _apiDocsUri = Uri.parse('https://saatdin.onrender.com/docs');
 
   Future<_ProfileViewData> _loadProfileViewData() async {
     final user = await _apiService.getProfile('me');
@@ -65,12 +70,17 @@ class ProfileScreen extends StatelessWidget {
         final claimCountThisMonth = _claimCountForCurrentMonth(claims);
         final settledPayout = _settledPayoutTotal(claims);
         final perTriggerPayout = _readInt(policy, const ['perTriggerPayout']);
-        final activePlan = _readString(policy, const ['plan'], fallback: user.plan);
+        final activePlan = _readString(policy, const [
+          'plan',
+        ], fallback: user.plan);
         final locationLabel = _buildLocationLabel(user);
         final policyStatusLabel =
-            _readString(policy, const ['status'], fallback: 'active').toLowerCase() == 'active'
-                ? 'Active policy'
-                : 'Policy update pending';
+            _readString(policy, const [
+                  'status',
+                ], fallback: 'active').toLowerCase() ==
+                'active'
+            ? 'Active policy'
+            : 'Policy update pending';
         final nextBillingDate = _readString(policy, const ['nextBillingDate']);
         final renewalLabel = _renewalLabel(nextBillingDate);
         final contact = _formatPhone(user.phone);
@@ -112,7 +122,8 @@ class ProfileScreen extends StatelessWidget {
                           iconBg: const Color(0xFFE1F5EE),
                           iconColor: const Color(0xFF0F6E56),
                           title: 'Payouts',
-                          subtitle: '₹${NumberFormat('#,##0').format(settledPayout)} received',
+                          subtitle:
+                              '₹${NumberFormat('#,##0').format(settledPayout)} received',
                           onTap: () => _switchToTab(context, 3),
                         ),
                         _MenuItemData(
@@ -133,33 +144,45 @@ class ProfileScreen extends StatelessWidget {
                           iconBg: const Color(0xFFF0F2F0),
                           iconColor: const Color(0xFF4A5E50),
                           title: 'Settings',
-                          onTap: () =>
-                              _showSimpleInfo(context, 'Settings panel opened.'),
+                          onTap: () => _showSimpleInfo(
+                            context,
+                            'Settings panel opened.',
+                          ),
                         ),
                         _MenuItemData(
                           icon: Icons.dark_mode_outlined,
                           iconBg: const Color(0xFFF0F2F0),
                           iconColor: const Color(0xFF4A5E50),
                           title: 'Theme',
-                          onTap: () =>
-                              _showSimpleInfo(context, 'Theme controls opened.'),
+                          onTap: () => _showSimpleInfo(
+                            context,
+                            'Theme controls opened.',
+                          ),
                         ),
                         _MenuItemData(
                           icon: Icons.grid_view_rounded,
                           iconBg: const Color(0xFFE6F1FB),
                           iconColor: const Color(0xFF185FA5),
-                          title: 'Advanced tools',
-                          badge: 'Beta',
-                          onTap: () => _showSimpleInfo(
-                              context, 'Advanced tools coming soon.'),
+                          title: 'Admin console',
+                          subtitle: 'Open the live backend admin UI',
+                          onTap: () => _openExternalLink(
+                            context,
+                            _adminConsoleUri,
+                            fallbackMessage:
+                                'Could not open the admin console.',
+                          ),
                         ),
                         _MenuItemData(
-                          icon: Icons.info_outline,
+                          icon: Icons.description_outlined,
                           iconBg: const Color(0xFFE1F5EE),
                           iconColor: const Color(0xFF0F6E56),
-                          title: 'Help and resources',
-                          onTap: () =>
-                              _showSimpleInfo(context, 'Help center opened.'),
+                          title: 'API docs',
+                          subtitle: 'Open live backend routes and schemas',
+                          onTap: () => _openExternalLink(
+                            context,
+                            _apiDocsUri,
+                            fallbackMessage: 'Could not open the API docs.',
+                          ),
                         ),
                       ]),
                       _buildSectionLabel('Account'),
@@ -227,8 +250,9 @@ class ProfileScreen extends StatelessWidget {
                       color: Colors.white,
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.4),
-                          width: 2),
+                        color: Colors.white.withValues(alpha: 0.4),
+                        width: 2,
+                      ),
                     ),
                     child: Center(
                       child: Text(
@@ -280,9 +304,15 @@ class ProfileScreen extends StatelessWidget {
               // Status pills
               Row(
                 children: [
-                  _statusPill(dotColor: const Color(0xFF6EFFC4), label: policyStatus),
+                  _statusPill(
+                    dotColor: const Color(0xFF6EFFC4),
+                    label: policyStatus,
+                  ),
                   const SizedBox(width: 8),
-                  _statusPill(dotColor: const Color(0xFFFFD980), label: locationLabel),
+                  _statusPill(
+                    dotColor: const Color(0xFFFFD980),
+                    label: locationLabel,
+                  ),
                 ],
               ),
             ],
@@ -305,8 +335,7 @@ class ProfileScreen extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(10),
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.2)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
         ),
         child: Icon(icon, size: 20, color: Colors.white),
       ),
@@ -318,13 +347,11 @@ class ProfileScreen extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       onTap: () => _showSimpleInfo(context, 'Edit profile opened.'),
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(8),
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.25)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
         ),
         child: const Text(
           'Edit',
@@ -338,17 +365,13 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _statusPill({
-    required Color dotColor,
-    required String label,
-  }) {
+  Widget _statusPill({required Color dotColor, required String label}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(99),
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.2)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -356,10 +379,7 @@ class ProfileScreen extends StatelessWidget {
           Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(
-              color: dotColor,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
           const SizedBox(width: 5),
           Text(
@@ -429,17 +449,13 @@ class ProfileScreen extends StatelessWidget {
               const SizedBox(height: 1),
               Text(
                 renewalLabel,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey.shade500,
-                ),
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
               ),
             ],
           ),
           const Spacer(),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: const Color(0xFFE1F5EE),
               borderRadius: BorderRadius.circular(99),
@@ -549,8 +565,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             if (item.badge != null) ...[
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: const Color(0xFFE1F5EE),
                   borderRadius: BorderRadius.circular(99),
@@ -566,11 +581,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(width: 6),
             ],
-            const Icon(
-              Icons.chevron_right,
-              size: 18,
-              color: Color(0xFFB0C4B8),
-            ),
+            const Icon(Icons.chevron_right, size: 18, color: Color(0xFFB0C4B8)),
           ],
         ),
       ),
@@ -605,9 +616,20 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showSimpleInfo(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _openExternalLink(
+    BuildContext context,
+    Uri uri, {
+    required String fallbackMessage,
+  }) async {
+    final opened = await openExternalLink(uri);
+    if (!opened && context.mounted) {
+      _showSimpleInfo(context, fallbackMessage);
+    }
   }
 
   void _switchToTab(BuildContext context, int index) {
@@ -622,7 +644,8 @@ class ProfileScreen extends StatelessWidget {
         return AlertDialog(
           title: const Text('Log out'),
           content: const Text(
-              'Are you sure you want to log out of this account?'),
+            'Are you sure you want to log out of this account?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
