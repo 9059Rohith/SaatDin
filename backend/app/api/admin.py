@@ -432,27 +432,31 @@ async def zonelock_reports(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
-    filters: list[tuple[str, Any]] = []
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        filters.append(("(r.phone ILIKE {param} OR r.description ILIKE {param} OR r.zone_name ILIKE {param} OR w.name ILIKE {param})", pattern))
-    if status_filter and status_filter.strip():
-        filters.append(("r.status ILIKE {param}", f"%{status_filter.strip()}%"))
-    if zone and zone.strip():
-        filters.append(("(r.zone_pincode ILIKE {param} OR r.zone_name ILIKE {param})", f"%{zone.strip()}%"))
+    try:
+        filters: list[tuple[str, Any]] = []
+        if search and search.strip():
+            pattern = f"%{search.strip()}%"
+            filters.append(("(r.phone ILIKE {param} OR r.description ILIKE {param} OR r.zone_name ILIKE {param} OR w.name ILIKE {param})", pattern))
+        if status_filter and status_filter.strip():
+            filters.append(("r.status ILIKE {param}", f"%{status_filter.strip()}%"))
+        if zone and zone.strip():
+            filters.append(("(r.zone_pincode ILIKE {param} OR r.zone_name ILIKE {param})", f"%{zone.strip()}%"))
 
-    where_sql, params = _build_filter_clause(filters)
-    limit_value = _safe_limit(limit)
-    offset_value = _safe_offset(offset)
-    params.extend([limit_value, offset_value])
-    sql = (
-        "SELECT r.*, w.name AS worker_name, w.platform_name AS worker_platform_name "
-        "FROM zonelock_reports r LEFT JOIN workers w ON w.phone = r.phone"
-        f"{where_sql} ORDER BY r.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
-    )
+        where_sql, params = _build_filter_clause(filters)
+        limit_value = _safe_limit(limit)
+        offset_value = _safe_offset(offset)
+        params.extend([limit_value, offset_value])
+        sql = (
+            "SELECT r.*, w.name AS worker_name, w.platform_name AS worker_platform_name "
+            "FROM zonelock_reports r LEFT JOIN workers w ON w.phone = r.phone"
+            f"{where_sql} ORDER BY r.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+        )
 
-    rows = await _fetch_rows(sql, params)
-    return ApiResponse(success=True, data={"items": [_format_report(row) for row in rows]})
+        rows = await _fetch_rows(sql, params)
+        return ApiResponse(success=True, data={"items": [_format_report(row) for row in rows]})
+    except Exception:
+        # Keep admin dashboard operational even when legacy DB schema misses ZoneLock fields.
+        return ApiResponse(success=True, data={"items": []}, message="ZoneLock reports unavailable")
 
 
 @router.post("/claims/{claim_id}/status", response_model=ApiResponse)
