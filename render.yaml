@@ -7,6 +7,8 @@ services:
     autoDeploy: true
     healthCheckPath: /healthz
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
       - key: SUPABASE_DB_URL
         sync: false
       - key: JWT_SECRET
