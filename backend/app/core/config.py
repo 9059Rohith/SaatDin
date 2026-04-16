@@ -92,7 +92,10 @@ class Settings(BaseSettings):
         default="http://localhost,http://localhost:3000,http://localhost:8080",
         validation_alias="CORS_ORIGINS",
     )
-    cors_allow_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    cors_allow_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+        r"|^https://saatdin(?:-[A-Za-z0-9-]+)?\.onrender\.com$"
+    )
 
     model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), extra="ignore")
 
