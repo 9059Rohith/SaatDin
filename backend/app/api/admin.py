@@ -150,19 +150,25 @@ async def _fetch_value(sql: str, params: list[Any]) -> Any:
 
 
 async def _table_exists(table_name: str) -> bool:
-    value = await _fetch_value(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",
-        [table_name],
-    )
-    return bool(value)
+    try:
+        value = await _fetch_value(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",
+            [table_name],
+        )
+        return bool(value)
+    except Exception:
+        return False
 
 
 async def _column_exists(table_name: str, column_name: str) -> bool:
-    value = await _fetch_value(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2)",
-        [table_name, column_name],
-    )
-    return bool(value)
+    try:
+        value = await _fetch_value(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2)",
+            [table_name, column_name],
+        )
+        return bool(value)
+    except Exception:
+        return False
 
 
 def _format_worker(row: dict[str, Any]) -> dict[str, Any]:
@@ -388,41 +394,44 @@ async def workers(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
-    has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
-    has_pending_plan_effective_at = await _column_exists("workers", "pending_plan_effective_at")
+    try:
+        has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
+        has_pending_plan_effective_at = await _column_exists("workers", "pending_plan_effective_at")
 
-    pending_plan_name_select = (
-        "pending_plan_name"
-        if has_pending_plan_name
-        else "NULL::text AS pending_plan_name"
-    )
-    pending_plan_effective_select = (
-        "pending_plan_effective_at"
-        if has_pending_plan_effective_at
-        else "NULL::timestamptz AS pending_plan_effective_at"
-    )
+        pending_plan_name_select = (
+            "pending_plan_name"
+            if has_pending_plan_name
+            else "NULL::text AS pending_plan_name"
+        )
+        pending_plan_effective_select = (
+            "pending_plan_effective_at"
+            if has_pending_plan_effective_at
+            else "NULL::timestamptz AS pending_plan_effective_at"
+        )
 
-    filters: list[tuple[str, Any]] = []
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        filters.append(("(phone ILIKE {param} OR name ILIKE {param} OR zone_name ILIKE {param} OR platform_name ILIKE {param} OR plan_name ILIKE {param})", pattern))
-    if zone and zone.strip():
-        filters.append(("(zone_name ILIKE {param} OR zone_pincode ILIKE {param})", f"%{zone.strip()}%"))
-    if platform and platform.strip():
-        filters.append(("platform_name ILIKE {param}", f"%{platform.strip()}%"))
+        filters: list[tuple[str, Any]] = []
+        if search and search.strip():
+            pattern = f"%{search.strip()}%"
+            filters.append(("(phone ILIKE {param} OR name ILIKE {param} OR zone_name ILIKE {param} OR platform_name ILIKE {param} OR plan_name ILIKE {param})", pattern))
+        if zone and zone.strip():
+            filters.append(("(zone_name ILIKE {param} OR zone_pincode ILIKE {param})", f"%{zone.strip()}%"))
+        if platform and platform.strip():
+            filters.append(("platform_name ILIKE {param}", f"%{platform.strip()}%"))
 
-    where_sql, params = _build_filter_clause(filters)
-    limit_value = _safe_limit(limit)
-    offset_value = _safe_offset(offset)
-    params.extend([limit_value, offset_value])
-    sql = (
-        "SELECT phone, name, platform_name, zone_pincode, zone_name, plan_name, "
-        f"{pending_plan_name_select}, {pending_plan_effective_select}, created_at FROM workers"
-        f"{where_sql} ORDER BY created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
-    )
+        where_sql, params = _build_filter_clause(filters)
+        limit_value = _safe_limit(limit)
+        offset_value = _safe_offset(offset)
+        params.extend([limit_value, offset_value])
+        sql = (
+            "SELECT phone, name, platform_name, zone_pincode, zone_name, plan_name, "
+            f"{pending_plan_name_select}, {pending_plan_effective_select}, created_at FROM workers"
+            f"{where_sql} ORDER BY created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+        )
 
-    rows = await _fetch_rows(sql, params)
-    return ApiResponse(success=True, data={"items": [_format_worker(row) for row in rows]})
+        rows = await _fetch_rows(sql, params)
+        return ApiResponse(success=True, data={"items": [_format_worker(row) for row in rows]})
+    except Exception:
+        return ApiResponse(success=True, data={"items": []}, message="Workers temporarily unavailable")
 
 
 @router.get("/claims", response_model=ApiResponse)
@@ -436,36 +445,39 @@ async def claims(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
-    has_claim_source = await _column_exists("claims", "source")
+    try:
+        has_claim_source = await _column_exists("claims", "source")
 
-    filters: list[tuple[str, Any]] = []
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        filters.append(("(c.phone ILIKE {param} OR c.claim_type ILIKE {param} OR c.status ILIKE {param} OR c.description ILIKE {param} OR c.zone_pincode ILIKE {param} OR w.name ILIKE {param})", pattern))
-    if status_filter and status_filter.strip():
-        filters.append(("c.status ILIKE {param}", f"%{status_filter.strip()}%"))
-    if claim_type and claim_type.strip():
-        filters.append(("c.claim_type ILIKE {param}", f"%{claim_type.strip()}%"))
-    if source and source.strip() and has_claim_source:
-        filters.append(("c.source ILIKE {param}", f"%{source.strip()}%"))
-    if zone and zone.strip():
-        filters.append(("(c.zone_pincode ILIKE {param} OR w.zone_name ILIKE {param})", f"%{zone.strip()}%"))
+        filters: list[tuple[str, Any]] = []
+        if search and search.strip():
+            pattern = f"%{search.strip()}%"
+            filters.append(("(c.phone ILIKE {param} OR c.claim_type ILIKE {param} OR c.status ILIKE {param} OR c.description ILIKE {param} OR c.zone_pincode ILIKE {param} OR w.name ILIKE {param})", pattern))
+        if status_filter and status_filter.strip():
+            filters.append(("c.status ILIKE {param}", f"%{status_filter.strip()}%"))
+        if claim_type and claim_type.strip():
+            filters.append(("c.claim_type ILIKE {param}", f"%{claim_type.strip()}%"))
+        if source and source.strip() and has_claim_source:
+            filters.append(("c.source ILIKE {param}", f"%{source.strip()}%"))
+        if zone and zone.strip():
+            filters.append(("(c.zone_pincode ILIKE {param} OR w.zone_name ILIKE {param})", f"%{zone.strip()}%"))
 
-    where_sql, params = _build_filter_clause(filters)
-    limit_value = _safe_limit(limit)
-    offset_value = _safe_offset(offset)
-    params.extend([limit_value, offset_value])
-    source_select = "c.source" if has_claim_source else "'unknown'::text AS source"
-    sql = (
-        "SELECT c.*, "
-        f"{source_select}, "
-        "w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
-        "FROM claims c LEFT JOIN workers w ON w.phone = c.phone"
-        f"{where_sql} ORDER BY c.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
-    )
+        where_sql, params = _build_filter_clause(filters)
+        limit_value = _safe_limit(limit)
+        offset_value = _safe_offset(offset)
+        params.extend([limit_value, offset_value])
+        source_select = "c.source" if has_claim_source else "'unknown'::text AS source"
+        sql = (
+            "SELECT c.*, "
+            f"{source_select}, "
+            "w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
+            "FROM claims c LEFT JOIN workers w ON w.phone = c.phone"
+            f"{where_sql} ORDER BY c.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+        )
 
-    rows = await _fetch_rows(sql, params)
-    return ApiResponse(success=True, data={"items": [_format_claim(row) for row in rows]})
+        rows = await _fetch_rows(sql, params)
+        return ApiResponse(success=True, data={"items": [_format_claim(row) for row in rows]})
+    except Exception:
+        return ApiResponse(success=True, data={"items": []}, message="Claims temporarily unavailable")
 
 
 @router.get("/escalations", response_model=ApiResponse)
@@ -476,31 +488,34 @@ async def escalations(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
-    has_claim_source = await _column_exists("claims", "source")
+    try:
+        has_claim_source = await _column_exists("claims", "source")
 
-    filters: list[tuple[str, Any]] = []
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        filters.append(("(e.phone ILIKE {param} OR e.reason ILIKE {param} OR c.claim_type ILIKE {param} OR w.name ILIKE {param})", pattern))
-    if status_filter and status_filter.strip():
-        filters.append(("e.status ILIKE {param}", f"%{status_filter.strip()}%"))
+        filters: list[tuple[str, Any]] = []
+        if search and search.strip():
+            pattern = f"%{search.strip()}%"
+            filters.append(("(e.phone ILIKE {param} OR e.reason ILIKE {param} OR c.claim_type ILIKE {param} OR w.name ILIKE {param})", pattern))
+        if status_filter and status_filter.strip():
+            filters.append(("e.status ILIKE {param}", f"%{status_filter.strip()}%"))
 
-    where_sql, params = _build_filter_clause(filters)
-    limit_value = _safe_limit(limit)
-    offset_value = _safe_offset(offset)
-    params.extend([limit_value, offset_value])
-    source_select = "c.source" if has_claim_source else "'unknown'::text AS source"
-    sql = (
-        f"SELECT e.*, c.claim_type, c.status AS claim_status, c.amount, c.zone_pincode, {source_select}, "
-        "w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
-        "FROM claim_escalations e "
-        "LEFT JOIN claims c ON c.id = e.claim_id "
-        "LEFT JOIN workers w ON w.phone = e.phone"
-        f"{where_sql} ORDER BY e.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
-    )
+        where_sql, params = _build_filter_clause(filters)
+        limit_value = _safe_limit(limit)
+        offset_value = _safe_offset(offset)
+        params.extend([limit_value, offset_value])
+        source_select = "c.source" if has_claim_source else "'unknown'::text AS source"
+        sql = (
+            f"SELECT e.*, c.claim_type, c.status AS claim_status, c.amount, c.zone_pincode, {source_select}, "
+            "w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
+            "FROM claim_escalations e "
+            "LEFT JOIN claims c ON c.id = e.claim_id "
+            "LEFT JOIN workers w ON w.phone = e.phone"
+            f"{where_sql} ORDER BY e.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+        )
 
-    rows = await _fetch_rows(sql, params)
-    return ApiResponse(success=True, data={"items": [_format_escalation(row) for row in rows]})
+        rows = await _fetch_rows(sql, params)
+        return ApiResponse(success=True, data={"items": [_format_escalation(row) for row in rows]})
+    except Exception:
+        return ApiResponse(success=True, data={"items": []}, message="Escalations temporarily unavailable")
 
 
 @router.get("/zonelock-reports", response_model=ApiResponse)
