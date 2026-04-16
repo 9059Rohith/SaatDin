@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
@@ -384,11 +385,18 @@ class TriggerMonitor:
         self._scheduler = AsyncIOScheduler(timezone="UTC")
         self._started = False
 
+    async def _safe_refresh(self) -> None:
+        try:
+            await refresh_live_trigger_state()
+        except Exception:
+            logger.exception("trigger_refresh_failed")
+
     async def start(self) -> None:
         if self._started:
             return
-        self._scheduler.add_job(refresh_live_trigger_state, "interval", minutes=5, id="trigger_refresh", replace_existing=True)
-        await refresh_live_trigger_state()
+        self._scheduler.add_job(self._safe_refresh, "interval", minutes=5, id="trigger_refresh", replace_existing=True)
+        # Do not block API boot on external API fetches; run initial refresh in background.
+        asyncio.create_task(self._safe_refresh())
         self._scheduler.start()
         self._started = True
         logger.info("trigger_monitor_started")

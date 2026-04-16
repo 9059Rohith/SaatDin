@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -36,7 +37,8 @@ class CoClaimClusterMonitor:
             id="co_claim_cluster_refresh",
             replace_existing=True,
         )
-        await self._run_job()
+        # Initial snapshot can be expensive; keep boot fast and run it in background.
+        asyncio.create_task(self._run_job())
         self._scheduler.start()
         self._scheduler_running = True
         self._started = True
