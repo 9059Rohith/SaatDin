@@ -149,6 +149,22 @@ async def _fetch_value(sql: str, params: list[Any]) -> Any:
         return await conn.fetchval(sql, *params)
 
 
+async def _table_exists(table_name: str) -> bool:
+    value = await _fetch_value(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1)",
+        [table_name],
+    )
+    return bool(value)
+
+
+async def _column_exists(table_name: str, column_name: str) -> bool:
+    value = await _fetch_value(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2)",
+        [table_name, column_name],
+    )
+    return bool(value)
+
+
 def _format_worker(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "phone": str(row["phone"]),
@@ -276,6 +292,20 @@ async def session(request: Request) -> ApiResponse:
 @router.get("/overview", response_model=ApiResponse)
 async def overview(_admin: dict[str, Any] = Depends(_require_admin)) -> ApiResponse:
     zones = load_zone_map()
+    has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
+    has_zonelock_reports = await _table_exists("zonelock_reports")
+
+    pending_plan_changes_query = (
+        "SELECT COUNT(*) FROM workers WHERE pending_plan_name IS NOT NULL"
+        if has_pending_plan_name
+        else "SELECT 0"
+    )
+    pending_zonelock_reports_query = (
+        "SELECT COUNT(*) FROM zonelock_reports WHERE status = 'pending'"
+        if has_zonelock_reports
+        else "SELECT 0"
+    )
+
     totals = {
         "zones": len(zones),
         "workers": int(await _fetch_value("SELECT COUNT(*) FROM workers", [] ) or 0),
@@ -287,13 +317,13 @@ async def overview(_admin: dict[str, Any] = Depends(_require_admin)) -> ApiRespo
             await _fetch_value("SELECT COUNT(*) FROM claim_escalations WHERE status = 'pending_review'", []) or 0
         ),
         "pendingZoneLockReports": int(
-            await _fetch_value("SELECT COUNT(*) FROM zonelock_reports WHERE status = 'pending'", []) or 0
+            await _fetch_value(pending_zonelock_reports_query, []) or 0
         ),
         "totalSettledAmount": float(
             await _fetch_value("SELECT COALESCE(SUM(amount), 0) FROM claims WHERE status = 'settled'", []) or 0
         ),
         "pendingPlanChanges": int(
-            await _fetch_value("SELECT COUNT(*) FROM workers WHERE pending_plan_name IS NOT NULL", []) or 0
+            await _fetch_value(pending_plan_changes_query, []) or 0
         ),
     }
 
@@ -305,9 +335,13 @@ async def overview(_admin: dict[str, Any] = Depends(_require_admin)) -> ApiRespo
         "SELECT status, COUNT(*) AS total FROM claim_escalations GROUP BY status ORDER BY status",
         [],
     )
-    report_status_rows = await _fetch_rows(
-        "SELECT status, COUNT(*) AS total FROM zonelock_reports GROUP BY status ORDER BY status",
-        [],
+    report_status_rows = (
+        await _fetch_rows(
+            "SELECT status, COUNT(*) AS total FROM zonelock_reports GROUP BY status ORDER BY status",
+            [],
+        )
+        if has_zonelock_reports
+        else []
     )
 
     return ApiResponse(
@@ -330,6 +364,20 @@ async def workers(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
+    has_pending_plan_name = await _column_exists("workers", "pending_plan_name")
+    has_pending_plan_effective_at = await _column_exists("workers", "pending_plan_effective_at")
+
+    pending_plan_name_select = (
+        "pending_plan_name"
+        if has_pending_plan_name
+        else "NULL::text AS pending_plan_name"
+    )
+    pending_plan_effective_select = (
+        "pending_plan_effective_at"
+        if has_pending_plan_effective_at
+        else "NULL::timestamptz AS pending_plan_effective_at"
+    )
+
     filters: list[tuple[str, Any]] = []
     if search and search.strip():
         pattern = f"%{search.strip()}%"
@@ -344,8 +392,8 @@ async def workers(
     offset_value = _safe_offset(offset)
     params.extend([limit_value, offset_value])
     sql = (
-        "SELECT phone, name, platform_name, zone_pincode, zone_name, plan_name, pending_plan_name, "
-        "pending_plan_effective_at, created_at FROM workers"
+        "SELECT phone, name, platform_name, zone_pincode, zone_name, plan_name, "
+        f"{pending_plan_name_select}, {pending_plan_effective_select}, created_at FROM workers"
         f"{where_sql} ORDER BY created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
     )
 
@@ -364,6 +412,8 @@ async def claims(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
+    has_claim_source = await _column_exists("claims", "source")
+
     filters: list[tuple[str, Any]] = []
     if search and search.strip():
         pattern = f"%{search.strip()}%"
@@ -372,7 +422,7 @@ async def claims(
         filters.append(("c.status ILIKE {param}", f"%{status_filter.strip()}%"))
     if claim_type and claim_type.strip():
         filters.append(("c.claim_type ILIKE {param}", f"%{claim_type.strip()}%"))
-    if source and source.strip():
+    if source and source.strip() and has_claim_source:
         filters.append(("c.source ILIKE {param}", f"%{source.strip()}%"))
     if zone and zone.strip():
         filters.append(("(c.zone_pincode ILIKE {param} OR w.zone_name ILIKE {param})", f"%{zone.strip()}%"))
@@ -381,8 +431,11 @@ async def claims(
     limit_value = _safe_limit(limit)
     offset_value = _safe_offset(offset)
     params.extend([limit_value, offset_value])
+    source_select = "c.source" if has_claim_source else "'unknown'::text AS source"
     sql = (
-        "SELECT c.*, w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
+        "SELECT c.*, "
+        f"{source_select}, "
+        "w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
         "FROM claims c LEFT JOIN workers w ON w.phone = c.phone"
         f"{where_sql} ORDER BY c.created_at DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
     )
@@ -399,6 +452,8 @@ async def escalations(
     offset: int | None = Query(default=0, ge=0),
     _admin: dict[str, Any] = Depends(_require_admin),
 ) -> ApiResponse:
+    has_claim_source = await _column_exists("claims", "source")
+
     filters: list[tuple[str, Any]] = []
     if search and search.strip():
         pattern = f"%{search.strip()}%"
@@ -410,8 +465,9 @@ async def escalations(
     limit_value = _safe_limit(limit)
     offset_value = _safe_offset(offset)
     params.extend([limit_value, offset_value])
+    source_select = "c.source" if has_claim_source else "'unknown'::text AS source"
     sql = (
-        "SELECT e.*, c.claim_type, c.status AS claim_status, c.amount, c.zone_pincode, c.source, "
+        f"SELECT e.*, c.claim_type, c.status AS claim_status, c.amount, c.zone_pincode, {source_select}, "
         "w.name AS worker_name, w.zone_name AS worker_zone_name, w.platform_name AS worker_platform_name "
         "FROM claim_escalations e "
         "LEFT JOIN claims c ON c.id = e.claim_id "

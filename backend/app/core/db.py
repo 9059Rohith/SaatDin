@@ -119,6 +119,10 @@ async def init_db() -> None:
             )
             """
         )
+        await conn.execute("ALTER TABLE claims ADD COLUMN IF NOT EXISTS source TEXT")
+        await conn.execute("UPDATE claims SET source = 'manual' WHERE source IS NULL")
+        await conn.execute("ALTER TABLE claims ALTER COLUMN source SET DEFAULT 'manual'")
+        await conn.execute("ALTER TABLE claims ALTER COLUMN source SET NOT NULL")
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS worker_location_signals (
