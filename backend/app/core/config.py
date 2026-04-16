@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, List
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -88,21 +88,17 @@ class Settings(BaseSettings):
     motion_validation_adjustment_cap: float = 0.10
     motion_signal_retention_days: int = 14
 
-    cors_origins: List[str] = [
-        "http://localhost",
-        "http://localhost:3000",
-        "http://localhost:8080",
-    ]
+    cors_origins_raw: str = Field(
+        default="http://localhost,http://localhost:3000,http://localhost:8080",
+        validation_alias="CORS_ORIGINS",
+    )
     cors_allow_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), extra="ignore")
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _parse_cors_origins(cls, value: Any) -> List[str]:
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return value
+    @property
+    def cors_origins(self) -> List[str]:
+        return [item.strip() for item in str(self.cors_origins_raw).split(",") if item.strip()]
 
     @field_validator("fraud_llm_provider_order", mode="before")
     @classmethod
