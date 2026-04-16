@@ -28,26 +28,62 @@ ADMIN_UI_DIR = Path(__file__).resolve().parents[1] / "admin_ui"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logger.info("app_starting")
-    await init_db()
-    load_zone_map()
-    
-    # Initialize ML model for dynamic premium calculation
-    initialize_premium_model()
+    try:
+        await init_db()
+    except Exception:
+        logger.exception("startup_db_init_failed")
 
-    # Initialize fraud anomaly model for claim scoring
-    initialize_fraud_model()
-    
-    # Initialize external API client for real trigger data
-    await initialize_api_client()
-    
-    await trigger_monitor.start()
-    await co_claim_cluster_monitor.start()
+    try:
+        load_zone_map()
+    except Exception:
+        logger.exception("startup_zone_cache_failed")
+
+    try:
+        # Initialize ML model for dynamic premium calculation
+        initialize_premium_model()
+    except Exception:
+        logger.exception("startup_premium_model_failed")
+
+    try:
+        # Initialize fraud anomaly model for claim scoring
+        initialize_fraud_model()
+    except Exception:
+        logger.exception("startup_fraud_model_failed")
+
+    try:
+        # Initialize external API client for real trigger data
+        await initialize_api_client()
+    except Exception:
+        logger.exception("startup_api_client_failed")
+
+    try:
+        await trigger_monitor.start()
+    except Exception:
+        logger.exception("startup_trigger_monitor_failed")
+
+    try:
+        await co_claim_cluster_monitor.start()
+    except Exception:
+        logger.exception("startup_co_claim_monitor_failed")
+
     logger.info("app_started")
     yield
-    await co_claim_cluster_monitor.stop()
-    await trigger_monitor.stop()
-    await close_api_client()
-    await close_db()
+    try:
+        await co_claim_cluster_monitor.stop()
+    except Exception:
+        logger.exception("shutdown_co_claim_monitor_failed")
+    try:
+        await trigger_monitor.stop()
+    except Exception:
+        logger.exception("shutdown_trigger_monitor_failed")
+    try:
+        await close_api_client()
+    except Exception:
+        logger.exception("shutdown_api_client_failed")
+    try:
+        await close_db()
+    except Exception:
+        logger.exception("shutdown_db_failed")
     logger.info("app_stopped")
 
 
