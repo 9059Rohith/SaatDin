@@ -48,6 +48,7 @@ async def lifespan(_: FastAPI):
     await trigger_monitor.stop()
     await close_api_client()
     await close_db()
+    logger.info("app_stopped")
 
 
 app = FastAPI(
@@ -76,3 +77,24 @@ app.include_router(workers.router, prefix="/api/v1")
 app.include_router(triggers.router, prefix="/api/v1/triggers")
 app.include_router(fraud_clusters.router, prefix="/api/v1/fraud")
 app.include_router(admin.router, prefix="/api/v1/admin")
+
+if ADMIN_UI_DIR.exists():
+    app.mount("/admin/assets", StaticFiles(directory=ADMIN_UI_DIR), name="admin-assets")
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> dict[str, str]:
+    return {"service": settings.app_name, "status": "ok", "version": settings.app_version}
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz() -> dict[str, str]:
+    # Lightweight liveness endpoint for hosting platform probes.
+    return {"status": "ok"}
+
+
+@app.get("/admin", include_in_schema=False)
+@app.get("/admin/{path:path}", include_in_schema=False)
+async def admin_ui(path: str = "") -> FileResponse:
+    _ = path
+    return FileResponse(ADMIN_UI_DIR / "index.html")
