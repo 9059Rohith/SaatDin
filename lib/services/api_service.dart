@@ -32,8 +32,6 @@ class ApiService {
     if (kIsWeb) {
       return const [
         productionBaseUrl,
-        'http://localhost:8000/api/v1',
-        'http://localhost:8005/api/v1',
       ];
     }
 
