@@ -1,0 +1,22 @@
+{
+  "version": "v1",
+  "trained_at_utc": "2026-04-09T08:08:16.174964+00:00",
+  "model_type": "IsolationForest",
+  "feature_names": [
+    "zone_affinity_score",
+    "fraud_ring_size",
+    "recent_claims_24h",
+    "claim_amount",
+    "trigger_confidence",
+    "is_manual_source",
+    "is_auto_source",
+    "flood_risk_score",
+    "aqi_risk_score",
+    "traffic_congestion_score"
+  ],
+  "contamination": 0.08,
+  "random_seed": 42,
+  "real_samples": 0,
+  "synthetic_samples": 1200,
+  "total_samples": 1200
+}

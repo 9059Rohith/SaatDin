@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SaatDin Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/admin/assets/app.css" />
+</head>
+<body>
+  <div class="background-glow background-glow-a"></div>
+  <div class="background-glow background-glow-b"></div>
+
+  <main class="shell">
+    <section class="login-screen" id="loginScreen">
+      <div class="hero-card">
+        <div class="brand-row">
+          <div class="brand-mark">SD</div>
+          <div>
+            <p class="eyebrow">SaatDin Admin Console</p>
+            <h1>Operate claims, reviews, and worker coverage from the web.</h1>
+          </div>
+        </div>
+        <p class="hero-copy">
+          A single browser dashboard for worker oversight, claim review queues, ZoneLock moderation, and escalation handling.
+        </p>
+        <div class="hero-points">
+          <span>Live backend data</span>
+          <span>Review workflows</span>
+          <span>Web-only, no Flutter changes</span>
+        </div>
+      </div>
+
+      <div class="login-card">
+        <h2>Admin sign in</h2>
+        <p class="muted">Use the admin password configured on the backend. Local default: <strong>saatdin-admin</strong>.</p>
+        <form id="loginForm" class="form-stack">
+          <label class="field">
+            <span>Password</span>
+            <input id="adminPassword" name="password" type="password" placeholder="Enter admin password" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button" type="submit">Open dashboard</button>
+        </form>
+        <p class="form-note" id="loginError" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="dashboard-screen hidden" id="dashboardScreen">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Operational dashboard</p>
+          <h1>SaatDin Admin</h1>
+          <p class="muted">Monitor the platform, settle disputes, and review risk events in real time.</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="secondary-button" id="refreshButton" type="button">Refresh</button>
+          <button class="secondary-button" id="logoutButton" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <section class="kpi-grid" id="kpiGrid"></section>
+
+      <section class="workspace">
+        <div class="workspace-main">
+          <nav class="tabbar" aria-label="Admin sections">
+            <button class="tab-button active" data-tab="overview" type="button">Overview</button>
+            <button class="tab-button" data-tab="workers" type="button">Workers</button>
+            <button class="tab-button" data-tab="claims" type="button">Claims</button>
+            <button class="tab-button" data-tab="reviews" type="button">Reviews</button>
+          </nav>
+
+          <section class="panel active" data-panel="overview">
+            <div class="panel-header">
+              <div>
+                <h2>Overview</h2>
+                <p class="muted">Key fleet, claims, and queue metrics.</p>
+              </div>
+            </div>
+            <div class="overview-grid" id="overviewBreakdown"></div>
+          </section>
+
+          <section class="panel" data-panel="workers">
+            <div class="panel-header">
+              <div>
+                <h2>Workers</h2>
+                <p class="muted">Search registered riders and inspect coverage state.</p>
+              </div>
+              <button class="ghost-button" data-reset-filters="workers" type="button">Reset filters</button>
+            </div>
+            <form class="filters" id="workerFilters">
+              <label class="field compact">
+                <span>Search</span>
+                <input id="workerSearch" type="search" placeholder="Phone, name, zone, plan" />
+              </label>
+              <label class="field compact">
+                <span>Zone</span>
+                <input id="workerZone" type="text" placeholder="Bellandur" />
+              </label>
+              <label class="field compact">
+                <span>Platform</span>
+                <input id="workerPlatform" type="text" placeholder="Blinkit" />
+              </label>
+              <button class="primary-button compact" type="submit">Apply</button>
+            </form>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Worker</th>
+                    <th>Platform</th>
+                    <th>Zone</th>
+                    <th>Plan</th>
+                    <th>Pending</th>
+                    <th>Joined</th>
+                  </tr>
+                </thead>
+                <tbody id="workersTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel" data-panel="claims">
+            <div class="panel-header">
+              <div>
+                <h2>Claims</h2>
+                <p class="muted">Review claim status and update settlements from the browser.</p>
+              </div>
+              <button class="ghost-button" data-reset-filters="claims" type="button">Reset filters</button>
+            </div>
+            <form class="filters" id="claimFilters">
+              <label class="field compact">
+                <span>Search</span>
+                <input id="claimSearch" type="search" placeholder="Claim, phone, description" />
+              </label>
+              <label class="field compact">
+                <span>Status</span>
+                <input id="claimStatus" type="text" placeholder="settled" />
+              </label>
+              <label class="field compact">
+                <span>Type</span>
+                <input id="claimType" type="text" placeholder="RainLock" />
+              </label>
+              <label class="field compact">
+                <span>Source</span>
+                <input id="claimSource" type="text" placeholder="auto" />
+              </label>
+              <button class="primary-button compact" type="submit">Apply</button>
+            </form>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Claim</th>
+                    <th>Worker</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="claimsTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel" data-panel="reviews">
+            <div class="panel-header">
+              <div>
+                <h2>Review queues</h2>
+                <p class="muted">Handle worker escalations and ZoneLock moderation.</p>
+              </div>
+              <button class="ghost-button" data-reset-filters="reviews" type="button">Reset filters</button>
+            </div>
+
+            <div class="split-panels">
+              <div>
+                <h3>Claim escalations</h3>
+                <form class="filters" id="escalationFilters">
+                  <label class="field compact">
+                    <span>Search</span>
+                    <input id="escalationSearch" type="search" placeholder="Reason, phone, claim" />
+                  </label>
+                  <label class="field compact">
+                    <span>Status</span>
+                    <input id="escalationStatus" type="text" placeholder="pending_review" />
+                  </label>
+                  <button class="primary-button compact" type="submit">Apply</button>
+                </form>
+                <div class="table-wrap narrow">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Escalation</th>
+                        <th>Claim</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="escalationsTable"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <h3>ZoneLock reports</h3>
+                <form class="filters" id="reportFilters">
+                  <label class="field compact">
+                    <span>Search</span>
+                    <input id="reportSearch" type="search" placeholder="Zone, phone, description" />
+                  </label>
+                  <label class="field compact">
+                    <span>Status</span>
+                    <input id="reportStatus" type="text" placeholder="pending" />
+                  </label>
+                  <label class="field compact">
+                    <span>Zone</span>
+                    <input id="reportZone" type="text" placeholder="Bellandur" />
+                  </label>
+                  <button class="primary-button compact" type="submit">Apply</button>
+                </form>
+                <div class="table-wrap narrow">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Report</th>
+                        <th>Zone</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="reportsTable"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="detail-panel">
+          <div class="detail-card">
+            <p class="eyebrow">Selected record</p>
+            <div id="detailContent" class="detail-content">
+              <p class="muted">Select a row from any table to inspect details and review actions here.</p>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </section>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  </main>
+
+  <script src="/admin/assets/app.js"></script>
+</body>
+</html>
