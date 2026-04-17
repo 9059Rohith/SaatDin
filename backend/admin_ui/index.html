@@ -6,7 +6,7 @@
   <title>SaatDin Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/admin/assets/app.css" />
 </head>
 <body>
@@ -16,33 +16,55 @@
   <main class="shell">
     <section class="login-screen" id="loginScreen">
       <div class="hero-card">
-        <div class="brand-row">
-          <div class="brand-mark">SD</div>
-          <div>
-            <p class="eyebrow">SaatDin Admin Console</p>
-            <h1>Operate claims, reviews, and worker coverage from the web.</h1>
-          </div>
-        </div>
-        <p class="hero-copy">
-          A single browser dashboard for worker oversight, claim review queues, ZoneLock moderation, and escalation handling.
-        </p>
-        <div class="hero-points">
-          <span>Live backend data</span>
-          <span>Review workflows</span>
-          <span>Web-only, no Flutter changes</span>
+        <nav class="login-nav" aria-label="Main navigation">
+          <a href="#">Home</a>
+          <a href="#">About</a>
+          <a href="#">Services</a>
+          <a href="#">Blog</a>
+          <a href="#">Contact</a>
+          <a href="#">Book Now</a>
+        </nav>
+
+        <div class="hero-copy-wrap">
+          <p class="eyebrow">My Dashboard</p>
+          <h1>Admin Login.</h1>
         </div>
       </div>
 
       <div class="login-card">
-        <h2>Admin sign in</h2>
-        <p class="muted">Use the admin password configured on the backend. Local default: <strong>saatdin-admin</strong>.</p>
+        <div class="login-brand">
+          <div class="login-brand-mark">SD</div>
+          <div>
+            <p class="eyebrow">SaatDin Control</p>
+          </div>
+        </div>
+
+        <h2>Welcome Back!</h2>
+        <p class="muted">Log in to view your dashboard.</p>
+
         <form id="loginForm" class="form-stack">
+          <label class="field">
+            <span>Username</span>
+            <input id="adminUsername" name="username" type="text" placeholder="Enter username" autocomplete="username" />
+          </label>
           <label class="field">
             <span>Password</span>
             <input id="adminPassword" name="password" type="password" placeholder="Enter admin password" autocomplete="current-password" required />
           </label>
-          <button class="primary-button" type="submit">Open dashboard</button>
+
+          <div class="form-meta-row">
+            <label class="checkbox-row" for="keepSignedIn">
+              <input id="keepSignedIn" name="keepSignedIn" type="checkbox" />
+              <span>Keep me signed in</span>
+            </label>
+            <a class="forgot-link" href="#">Forgot password?</a>
+          </div>
+
+          <div class="login-submit-wrap">
+            <button class="primary-button" type="submit">Login</button>
+          </div>
         </form>
+        <p class="legal-copy">By signing in, you agree to internal admin access and activity monitoring policies.</p>
         <p class="form-note" id="loginError" aria-live="polite"></p>
       </div>
     </section>
